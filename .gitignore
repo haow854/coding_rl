@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# project outputs / artifacts
+outputs/
+data/
+wandb/
+*.log
+*.ckpt
+*.safetensors
+*.jsonl

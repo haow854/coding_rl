@@ -1,0 +1,13 @@
+# AutoDL image: PyTorch 2.8.0 / Python 3.12 / CUDA 12.x.
+# DO NOT reinstall torch — use the image's 2.8.0. Install the rest:
+transformers>=4.51        # Qwen3 support
+trl>=0.15                 # GRPOConfig / GRPOTrainer
+peft>=0.13                # LoRA
+datasets>=2.18
+accelerate>=0.34
+evalplus>=0.3.1
+
+# vLLM (fast rollouts + eval) must match the image's torch 2.8:
+#   pip install "vllm>=0.10"
+# If pip tries to DOWNGRADE torch, run the smoke first WITHOUT --use-vllm
+# (HF generation), then install a vLLM build matching torch 2.8 for the 14B run.

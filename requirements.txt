@@ -1,0 +1,21 @@
+# ── core (CPU; works locally for sandbox / reward / data development) ──────
+datasets>=2.18
+pydantic>=2.6
+numpy
+huggingface_hub
+pyyaml
+
+# ── eval harnesses ────────────────────────────────────────────────────────
+evalplus>=0.3.1
+# LiveCodeBench / BigCodeBench: install on the GPU box from their repos
+#   pip install git+https://github.com/LiveCodeBench/LiveCodeBench.git
+#   pip install bigcodebench --upgrade
+
+# ── training / inference (install on the AutoDL GPU box ONLY) ──────────────
+# torch          # match the box CUDA, e.g. --index-url https://download.pytorch.org/whl/cu121
+# transformers>=4.51      # Qwen3 support
+# vllm>=0.8               # fast rollouts (Qwen3)
+# trl>=0.12               # GRPOTrainer
+# peft>=0.13              # LoRA
+# accelerate
+# flash-attn              # optional
