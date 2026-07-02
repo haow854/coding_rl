@@ -72,7 +72,7 @@ python -m py_compile rlcoder/train/sft_trl.py rlcoder/train/grpo_trl.py
 `scripts/test_rollout.py` needs a local `data/clean_problems.jsonl`, so run it
 after building data.
 
-GPU workflow is in `scripts/autodl_quickstart.md`.
+RunPod/GPU workflow is in `scripts/runpod_quickstart.md`.
 
 ## Notes
 

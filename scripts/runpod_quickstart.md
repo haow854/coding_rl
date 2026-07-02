@@ -1,6 +1,6 @@
-# AutoDL quickstart
+# RunPod quickstart
 
-Local dev is CPU-only. Everything below runs on the rented GPU box.
+Local dev is CPU-only. Everything below runs on the RunPod GPU box.
 
 ## 0. Model and GPU
 
@@ -18,7 +18,7 @@ Do not attach the old `Qwen/Qwen3.5-2B-Base` SFT adapter to this model.
 
 ## 1. Environment
 
-Use an AutoDL image with PyTorch already installed, then install the project
+Use a RunPod PyTorch image with CUDA/PyTorch already installed, then install the project
 deps. Do not reinstall torch unless the image is broken.
 
 ```bash
@@ -100,8 +100,11 @@ Cheap probe:
 ```bash
 python scripts/difficulty_filter.py --model Qwen/Qwen3.5-2B \
   --in data/rl_pool.jsonl --out data/grpo_train_probe.jsonl \
+  --save-rollouts outputs/filter_rollouts_probe.jsonl \
   --max-problems 1000 \
-  --k 4 --keep-lo 1 --keep-hi 3 --max-tokens 1536
+  --k 8 --keep-lo 1 --keep-hi 7 \
+  --max-tokens 1024 --reward-timeout 3 \
+  --score-concurrency 64 --score-batch-size 512
 ```
 
 If the kept count is reasonable, run a larger filter:
@@ -109,11 +112,26 @@ If the kept count is reasonable, run a larger filter:
 ```bash
 python scripts/difficulty_filter.py --model Qwen/Qwen3.5-2B \
   --in data/rl_pool.jsonl --out data/grpo_train.jsonl \
+  --save-rollouts outputs/filter_rollouts_6k_g8.jsonl \
   --max-problems 6000 \
-  --k 4 --keep-lo 1 --keep-hi 3 --max-tokens 1536
+  --k 8 --keep-lo 1 --keep-hi 7 \
+  --max-tokens 1024 --reward-timeout 3 \
+  --score-concurrency 64 --score-batch-size 512
 ```
 
-If this keeps too few problems, relax to `--keep-lo 0 --keep-hi 3` for the
+If scoring is interrupted after rollouts were saved, resume without regenerating:
+
+```bash
+python scripts/difficulty_filter.py --model Qwen/Qwen3.5-2B \
+  --in data/rl_pool.jsonl --out data/grpo_train.jsonl \
+  --load-rollouts outputs/filter_rollouts_6k_g8.jsonl \
+  --max-problems 6000 \
+  --k 8 --keep-lo 1 --keep-hi 7 \
+  --reward-timeout 3 \
+  --score-concurrency 64 --score-batch-size 512
+```
+
+If this keeps too few problems, relax to `--keep-lo 0 --keep-hi 7` for the
 first smoke run, then tighten later.
 
 ## 5. GRPO smoke
@@ -123,7 +141,7 @@ Start without an init adapter:
 ```bash
 python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B \
   --data data/grpo_train_probe.jsonl --limit 256 \
-  --num-generations 4 --per-device-batch 4 --grad-accum 4 \
+  --num-generations 8 --per-device-batch 8 --grad-accum 4 \
   --max-prompt 1536 --max-completion 1024 --lr 5e-6 \
   --max-steps 100 \
   --bf16 --gradient-checkpointing \
@@ -140,15 +158,15 @@ Use the filtered training pool:
 ```bash
 python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B \
   --data data/grpo_train.jsonl \
-  --num-generations 4 --per-device-batch 4 --grad-accum 8 \
-  --max-prompt 1536 --max-completion 1536 --lr 5e-6 \
+  --num-generations 8 --per-device-batch 8 --grad-accum 4 \
+  --max-prompt 1536 --max-completion 1024 --lr 5e-6 \
   --epochs 1 \
   --bf16 --gradient-checkpointing \
   --output outputs/qwen3_5_2b_grpo
 ```
 
-If reward improves but training is noisy, rerun with `--num-generations 8
---per-device-batch 8` on a larger GPU.
+If reward improves and you have enough GPU headroom, raise `--max-completion`
+to 1536 or `--grad-accum` to 8.
 
 ## 7. Final eval
 

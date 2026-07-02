@@ -3,7 +3,7 @@
 On POSIX we additionally apply RLIMITs (CPU seconds, address space, no core
 dumps) via a preexec hook, and run the child in its own session so a timeout can
 kill the whole process group. On Windows these are skipped (local dev only); the
-real training / eval runs on Linux (AutoDL) where the limits apply. For stronger
+real training / eval runs on Linux (for example RunPod) where the limits apply. For stronger
 isolation in production, wrap `_runner` in nsjail / firejail.
 """
 from __future__ import annotations

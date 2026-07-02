@@ -1,5 +1,5 @@
 """Load problems from a local JSONL sample (CPU dev, stdlib only) or from the
-HuggingFace dataset (needs `datasets`; use on the AutoDL box)."""
+HuggingFace dataset (needs `datasets`; use on the GPU box)."""
 from __future__ import annotations
 
 import json

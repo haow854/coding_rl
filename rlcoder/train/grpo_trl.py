@@ -1,4 +1,4 @@
-"""Single-turn GRPO (RLVR) training with TRL + LoRA on the AutoDL GPU box.
+"""Single-turn GRPO (RLVR) training with TRL + LoRA on the GPU box.
 
 Main route: start from the post-trained Qwen3.5-2B checkpoint directly. Do not
 attach the old Base SFT adapter to this model.

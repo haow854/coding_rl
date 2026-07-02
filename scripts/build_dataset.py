@@ -4,7 +4,7 @@ passes its own tests under our judge, and save the normalised Problems to JSONL.
     # local, on the fetched sample
     python scripts/build_dataset.py --source jsonl --in data/sample_problems.jsonl
 
-    # on AutoDL, on the decontaminated HF dataset (streams; needs `datasets`)
+    # on the GPU box, on the decontaminated HF dataset (streams; needs `datasets`)
     python scripts/build_dataset.py --source hf --limit 8000 --out data/clean_problems.jsonl
 
     # fast RL bootstrap: trust the upstream tested/decontaminated flag

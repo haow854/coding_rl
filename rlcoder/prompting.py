@@ -62,9 +62,19 @@ def load_processing_class(model_name: str):
     return proc
 
 
-def render_chat_prompt(processing_class, messages: List[Dict[str, str]]) -> str:
-    return processing_class.apply_chat_template(
-        messages,
+def render_chat_prompt(
+    processing_class,
+    messages: List[Dict[str, str]],
+    enable_thinking: bool = False,
+) -> str:
+    kwargs = dict(
         tokenize=False,
         add_generation_prompt=True,
+        enable_thinking=enable_thinking,
     )
+    try:
+        return processing_class.apply_chat_template(messages, **kwargs)
+    except TypeError:
+        # Older tokenizers/processors may not accept Qwen's enable_thinking kwarg.
+        kwargs.pop("enable_thinking", None)
+        return processing_class.apply_chat_template(messages, **kwargs)
