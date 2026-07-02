@@ -45,7 +45,7 @@ class RewardConfig:
     not_run_penalty: float = -1.0
     timeout_penalty: float = -1.0
     format_bonus: float = 0.05   # clean ```python block present
-    think_bonus: float = 0.0     # set >0 to reward <think> reasoning
+    think_bonus: float = 0.05    # non-empty <think>...</think> reasoning present
     cheat_penalty: float = -1.0
 
 

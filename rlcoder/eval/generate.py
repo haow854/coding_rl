@@ -19,12 +19,12 @@ def generate(
     max_lora_rank: int = 32,
     seed: int = 0,
 ) -> List[List[str]]:
-    from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams
+    from rlcoder.prompting import load_processing_class, render_chat_prompt
 
-    tok = AutoTokenizer.from_pretrained(model)
+    proc = load_processing_class(model)
     prompts = [
-        tok.apply_chat_template(m, tokenize=False, add_generation_prompt=True)
+        render_chat_prompt(proc, m)
         for m in prompts_messages
     ]
 

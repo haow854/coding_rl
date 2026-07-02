@@ -9,7 +9,7 @@ from typing import List, Optional, Sequence, Tuple
 from rlcoder.data.schema import Problem
 from rlcoder.eval.generate import generate
 from rlcoder.eval.metrics import aggregate_pass_at_k
-from rlcoder.rollout.prompt import build_messages
+from rlcoder.prompting import build_messages
 from rlcoder.rollout.single_turn import score_batch
 
 

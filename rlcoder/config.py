@@ -1,8 +1,8 @@
 """Central project configuration.
 
-Defaults are intentionally conservative; training / eval scripts may override
-fields via CLI or yaml later. Items marked TODO must be confirmed against the
-upstream model/dataset/benchmark releases before a real run.
+Defaults target the first-stage experiment: Qwen3.5-2B-Base + LoRA SFT + GRPO
+on verified stdin/stdout coding problems. Training and eval scripts can override
+these values via CLI flags.
 """
 from __future__ import annotations
 
@@ -14,35 +14,28 @@ ROOT = Path(__file__).resolve().parent.parent
 
 @dataclass(frozen=True)
 class ModelConfig:
-    base_model: str = "Qwen/Qwen3-14B"
-    # Qwen3 pretraining cutoff is ~2024; LiveCodeBench must be evaluated on a
-    # window strictly AFTER this to control contamination (see EvalConfig).
-    train_cutoff: str = "2024-12"  # TODO: confirm exact Qwen3 data cutoff
-    max_seq_len: int = 16384
+    base_model: str = "Qwen/Qwen3.5-2B-Base"
+    max_seq_len: int = 4096
 
 
 @dataclass(frozen=True)
 class EvalConfig:
-    # Use a LiveCodeBench release window strictly after ModelConfig.train_cutoff.
-    lcb_release_version: str = "release_v6"   # TODO: confirm latest version
-    lcb_start_date: str = "2025-01-01"        # contamination-free window start
-    lcb_end_date: str = ""                    # empty = latest available
     pass_k: int = 1
-    n_samples: int = 1                        # >1 to estimate pass@k
+    n_samples: int = 1
     temperature: float = 0.2
     top_p: float = 0.95
 
 
 @dataclass(frozen=True)
 class DataConfig:
-    # Primary RL training pool: Python competitive problems with stdin/stdout
-    # tests (sources: apps / code_contests / taco), ~35.7k rows.
-    train_dataset: str = "open-r1/verifiable-coding-problems-python"
+    # Python competitive-programming problems with stdin/stdout tests.
+    train_dataset: str = "open-r1/verifiable-coding-problems-python_decontaminated-tested"
     judge_mode: str = "stdin_stdout"
-    max_tests_per_problem: int = 15  # cap tests used for reward to bound rollout cost
-    difficulty_probe_k: int = 8      # rollouts per problem when measuring difficulty
-    difficulty_keep_lo: int = 1      # keep problems with 1..k-1 passes (learnable)
-    max_train_problems: int = 4000
+    max_tests_per_problem: int = 10
+    difficulty_probe_k: int = 8
+    difficulty_keep_lo: int = 1
+    max_train_problems: int = 5000
+    holdout_problems: int = 500
 
 
 @dataclass(frozen=True)

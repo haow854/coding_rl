@@ -6,8 +6,8 @@ venv/
 .env
 
 # project outputs / artifacts
-outputs/
-data/
+/outputs/
+/data/
 wandb/
 *.log
 *.ckpt
