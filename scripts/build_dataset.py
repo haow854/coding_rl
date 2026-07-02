@@ -7,12 +7,11 @@ passes its own tests under our judge, and save the normalised Problems to JSONL.
     # on AutoDL, on the decontaminated HF dataset (streams; needs `datasets`)
     python scripts/build_dataset.py --source hf --limit 8000 --out data/clean_problems.jsonl
 
-    # fast SFT bootstrap: trust the upstream tested/decontaminated flag
+    # fast RL bootstrap: trust the upstream tested/decontaminated flag
     python scripts/build_dataset.py --source hf --limit 6000 --skip-verify \
         --out data/clean_problems.jsonl
 
-    # CoT-trace SFT data (reasoning + code, distilled from R1): verification
-    # matters more here since R1 solutions aren't 100% correct, don't skip it
+    # optional CoT-trace SFT ablation data (reasoning + code, distilled from R1)
     python scripts/build_dataset.py --source cots --limit 3000 \
         --out data/cots_problems.jsonl
 """
@@ -35,7 +34,10 @@ async def main() -> None:
     ap.add_argument("--source", choices=["jsonl", "hf", "cots"], default="jsonl")
     ap.add_argument("--hf-name",
                     default="open-r1/verifiable-coding-problems-python_decontaminated-tested")
-    ap.add_argument("--cots-config", default="solutions_py_decontaminated")
+    ap.add_argument("--cots-config", default="solutions_w_editorials_py_decontaminated")
+    ap.add_argument("--max-completion-tokens", type=int, default=5500,
+                    help="cots source only: drop rows whose reasoning+code trace "
+                         "exceeds this many tokens (R1 CoT length is heavy-tailed).")
     ap.add_argument("--in", dest="inp", default="data/sample_problems.jsonl")
     ap.add_argument("--out", default="data/clean_problems.jsonl")
     ap.add_argument("--limit", type=int, default=None)
@@ -49,7 +51,8 @@ async def main() -> None:
     if a.source == "jsonl":
         problems = load_jsonl(a.inp, limit=a.limit, max_tests=a.max_tests)
     elif a.source == "cots":
-        problems = load_cots(config=a.cots_config, limit=a.limit, max_tests=a.max_tests)
+        problems = load_cots(config=a.cots_config, limit=a.limit, max_tests=a.max_tests,
+                             max_completion_tokens=a.max_completion_tokens)
     else:
         problems = load_hf(name=a.hf_name, limit=a.limit, max_tests=a.max_tests)
     if a.skip_verify:

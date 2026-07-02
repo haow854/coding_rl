@@ -1,14 +1,14 @@
 """Difficulty filtering = DAPO-style dynamic sampling, done offline once.
 
-Probe the base model with k samples per problem and KEEP only those it solves
-sometimes-but-not-always (full-pass count in [keep_lo, keep_hi]). All-fail and
-all-pass problems give no GRPO gradient (zero advantage variance), so drop them.
-Output is the curated training pool. Runs on the GPU box (vLLM).
+Probe the current policy with k samples per problem and KEEP only those it
+solves sometimes-but-not-always (full-pass count in [keep_lo, keep_hi]).
+All-fail and all-pass problems give weak GRPO signal, so drop them for the
+first clean run. Output is the curated training pool. Runs on the GPU box
+(vLLM).
 
-    python scripts/difficulty_filter.py --model Qwen/Qwen3.5-2B-Base \
-        --lora outputs/qwen3_5_2b_sft \
+    python scripts/difficulty_filter.py --model Qwen/Qwen3.5-2B \
         --in data/clean_problems.jsonl --out data/train_problems.jsonl \
-        --k 8 --keep-lo 1 --keep-hi 7 --max-tokens 3072
+        --k 4 --keep-lo 1 --keep-hi 3 --max-tokens 1536
 """
 import argparse
 import json
@@ -26,16 +26,16 @@ from rlcoder.rollout.single_turn import score_batch    # noqa: E402
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="Qwen/Qwen3.5-2B-Base")
+    ap.add_argument("--model", default="Qwen/Qwen3.5-2B")
     ap.add_argument("--lora", default=None,
                     help="Optional LoRA adapter used while probing difficulty.")
     ap.add_argument("--in", dest="inp", default="data/clean_problems.jsonl")
     ap.add_argument("--out", default="data/train_problems.jsonl")
-    ap.add_argument("--k", type=int, default=8)
+    ap.add_argument("--k", type=int, default=4)
     ap.add_argument("--keep-lo", type=int, default=1)
-    ap.add_argument("--keep-hi", type=int, default=7)
+    ap.add_argument("--keep-hi", type=int, default=3)
     ap.add_argument("--max-problems", type=int, default=None)
-    ap.add_argument("--max-tokens", type=int, default=3072)
+    ap.add_argument("--max-tokens", type=int, default=1536)
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--max-model-len", type=int, default=8192)
     ap.add_argument("--gpu-mem-util", type=float, default=0.90)

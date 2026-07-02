@@ -1,8 +1,9 @@
 """Prompt and chat-template helpers shared by SFT, GRPO, and evaluation.
 
-These utilities are not RL rollout logic. They define the text interface used
-across all stages: problem statement in, one fenced Python stdin/stdout program
-out.
+These utilities are not RL rollout logic. They define the default text
+interface used across all stages: problem statement in, one fenced Python
+stdin/stdout program out. The first-stage route is deliberately non-thinking;
+reasoning traces are an optional later ablation, not the default contract.
 """
 from __future__ import annotations
 
@@ -11,12 +12,11 @@ from typing import Dict, List
 from rlcoder.data.schema import Problem
 
 SYSTEM_PROMPT = (
-    "You are an expert competitive programmer. Read the problem, then reason "
-    "about your approach inside a single <think>...</think> block, then output "
-    "your final solution as a single Python 3 program inside one ```python code "
-    "block. The program must read input from standard input (stdin) and write "
-    "the answer to standard output (stdout), exactly matching the output format "
-    "described in the problem."
+    "You are an expert competitive programmer. Read the problem and output "
+    "one complete Python 3 program inside a single ```python code block. "
+    "The program must read input from standard input (stdin) and write the "
+    "answer to standard output (stdout), exactly matching the output format "
+    "described in the problem. Do not include analysis or extra text."
 )
 
 QWEN_CHATML_TEMPLATE = (

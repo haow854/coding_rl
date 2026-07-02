@@ -1,13 +1,14 @@
-"""LoRA SFT warm-up for the code RLVR pipeline.
+"""Optional LoRA SFT script for ablations.
 
-The SFT stage teaches the base model the exact interaction format before GRPO:
-problem statement in, one fenced Python stdin/stdout program out. It uses the
-gold solutions from the verified JSONL produced by scripts/build_dataset.py.
+The main first-stage route now starts from the post-trained Qwen3.5-2B model
+and runs GRPO directly. Use this script only when you intentionally want a
+small format/data ablation; do not reuse a Base-trained SFT adapter on the
+post-trained checkpoint.
 
 Example on the GPU box:
-    python rlcoder/train/sft_trl.py --model Qwen/Qwen3.5-2B-Base \
-        --data data/train_problems.jsonl --limit 3000 \
-        --bf16 --gradient-checkpointing --output outputs/qwen3_5_2b_sft
+    python rlcoder/train/sft_trl.py --model Qwen/Qwen3.5-2B \
+        --data data/sft_train.jsonl --limit 1000 \
+        --bf16 --gradient-checkpointing --output outputs/qwen3_5_2b_sft_ablation
 """
 from __future__ import annotations
 
@@ -43,7 +44,7 @@ def build_hf_dataset(data_path: str, limit):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="Qwen/Qwen3.5-2B-Base")
+    ap.add_argument("--model", default="Qwen/Qwen3.5-2B")
     ap.add_argument("--data", default="data/train_problems.jsonl")
     ap.add_argument("--output", default="outputs/sft")
     ap.add_argument("--limit", type=int, default=None)

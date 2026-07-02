@@ -1,8 +1,9 @@
 """Central project configuration.
 
-Defaults target the first-stage experiment: Qwen3.5-2B-Base + LoRA SFT + GRPO
-on verified stdin/stdout coding problems. Training and eval scripts can override
-these values via CLI flags.
+Defaults target the first-stage experiment: start from the post-trained
+Qwen3.5-2B checkpoint and run RLVR/GRPO directly on verified stdin/stdout
+coding problems. SFT remains available as an optional ablation, not the default
+path. Training and eval scripts can override these values via CLI flags.
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 @dataclass(frozen=True)
 class ModelConfig:
-    base_model: str = "Qwen/Qwen3.5-2B-Base"
+    base_model: str = "Qwen/Qwen3.5-2B"
     max_seq_len: int = 4096
 
 
@@ -32,7 +33,7 @@ class DataConfig:
     train_dataset: str = "open-r1/verifiable-coding-problems-python_decontaminated-tested"
     judge_mode: str = "stdin_stdout"
     max_tests_per_problem: int = 10
-    difficulty_probe_k: int = 8
+    difficulty_probe_k: int = 4
     difficulty_keep_lo: int = 1
     max_train_problems: int = 5000
     holdout_problems: int = 500

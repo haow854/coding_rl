@@ -2,11 +2,11 @@
 for the in-house competitive held-out set and for base-vs-RL comparison.
 
     # baseline (base model, greedy-ish pass@1)
-    python scripts/eval_model.py --model Qwen/Qwen3.5-2B-Base \
+    python scripts/eval_model.py --model Qwen/Qwen3.5-2B \
         --data data/holdout.jsonl --out outputs/eval/base.json
 
     # after RL (LoRA adapter), pass@1 and pass@5
-    python scripts/eval_model.py --model Qwen/Qwen3.5-2B-Base --lora outputs/qwen3_5_2b_grpo \
+    python scripts/eval_model.py --model Qwen/Qwen3.5-2B --lora outputs/qwen3_5_2b_grpo \
         --data data/holdout.jsonl --n 5 --temperature 0.8 --ks 1,5 --out outputs/eval/rl.json
 """
 import argparse
@@ -28,7 +28,7 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--n", type=int, default=1)
     ap.add_argument("--temperature", type=float, default=0.2)
-    ap.add_argument("--max-tokens", type=int, default=4096)
+    ap.add_argument("--max-tokens", type=int, default=2048)
     ap.add_argument("--ks", default="1")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()

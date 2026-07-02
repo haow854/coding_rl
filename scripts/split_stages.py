@@ -1,12 +1,12 @@
-"""Stratified split for the stage-1 SFT -> GRPO workflow.
+"""Stratified split for the stage-1 post-trained -> GRPO workflow.
 
 The raw HF viewer is often grouped by source/problem id, so avoid head/tail
-splits. This script shuffles within source/difficulty buckets and writes three
-disjoint files:
+splits. This script shuffles within source/difficulty buckets and writes
+disjoint dev / optional-SFT / RL files. The main route uses --sft 0.
 
     python scripts/split_stages.py --in data/clean_problems.jsonl \
-        --sft-out data/sft_train.jsonl --rl-out data/rl_pool.jsonl \
-        --dev-out data/dev_internal.jsonl --dev 1000 --sft 10000
+        --sft-out data/unused_sft.jsonl --rl-out data/rl_pool.jsonl \
+        --dev-out data/dev_internal.jsonl --dev 1000 --sft 0
 """
 import argparse
 import json
@@ -72,7 +72,7 @@ def main() -> None:
     ap.add_argument("--rl-out", default="data/rl_pool.jsonl")
     ap.add_argument("--dev-out", default="data/dev_internal.jsonl")
     ap.add_argument("--dev", type=int, default=1000)
-    ap.add_argument("--sft", type=int, default=10000)
+    ap.add_argument("--sft", type=int, default=0)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 

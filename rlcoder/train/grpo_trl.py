@@ -1,15 +1,19 @@
 """Single-turn GRPO (RLVR) training with TRL + LoRA on the AutoDL GPU box.
 
-Smoke run after SFT:
-    python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B-Base \
-        --init-adapter outputs/qwen3_5_2b_sft --data data/train_problems.jsonl \
-        --limit 256 --num-generations 8 --max-steps 60 --bf16
+Main route: start from the post-trained Qwen3.5-2B checkpoint directly. Do not
+attach the old Base SFT adapter to this model.
+
+Smoke run:
+    python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B \
+        --data data/grpo_train.jsonl --limit 256 \
+        --num-generations 4 --per-device-batch 4 --max-steps 100 --bf16
 
 First real run:
-    python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B-Base \
-        --init-adapter outputs/qwen3_5_2b_sft --data data/train_problems.jsonl \
-        --num-generations 8 --max-completion 2048 --epochs 1 \
-        --bf16 --gradient-checkpointing --output outputs/qwen3_5_2b_grpo
+    python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B \
+        --data data/grpo_train.jsonl \
+        --num-generations 8 --per-device-batch 8 --max-completion 1536 \
+        --epochs 1 --bf16 --gradient-checkpointing \
+        --output outputs/qwen3_5_2b_grpo
 
 Targets TRL >= 0.15 (GRPOConfig / GRPOTrainer). A few defaults are already
 DAPO-flavoured: beta=0 (no KL), loss_type="dr_grpo" (no length bias), and
@@ -43,18 +47,19 @@ def build_hf_dataset(data_path: str, limit):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="Qwen/Qwen3.5-2B-Base")
+    ap.add_argument("--model", default="Qwen/Qwen3.5-2B")
     ap.add_argument("--init-adapter", default=None,
-                    help="Optional SFT LoRA adapter to continue training from.")
+                    help="Optional LoRA adapter to continue from; leave unset "
+                         "for the main post-trained direct-GRPO route.")
     ap.add_argument("--data", default="data/train_problems.jsonl")
     ap.add_argument("--output", default="outputs/grpo")
     ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--num-generations", type=int, default=8)
-    ap.add_argument("--per-device-batch", type=int, default=8)
+    ap.add_argument("--num-generations", type=int, default=4)
+    ap.add_argument("--per-device-batch", type=int, default=4)
     ap.add_argument("--grad-accum", type=int, default=4)
     ap.add_argument("--max-prompt", type=int, default=1536)
-    ap.add_argument("--max-completion", type=int, default=2048)
-    ap.add_argument("--lr", type=float, default=1e-6)
+    ap.add_argument("--max-completion", type=int, default=1536)
+    ap.add_argument("--lr", type=float, default=5e-6)
     ap.add_argument("--epochs", type=float, default=1.0)
     ap.add_argument("--max-steps", type=int, default=-1)
     ap.add_argument("--temperature", type=float, default=1.0)
@@ -92,7 +97,7 @@ def main() -> None:
         model = load_peft_model(args.init_adapter, args.model, bf16=args.bf16,
                                 is_trainable=True)
         peft_config = None
-        print(f"continuing GRPO from SFT adapter: {args.init_adapter}")
+        print(f"continuing GRPO from adapter: {args.init_adapter}")
     else:
         model = load_base_model(args.model, bf16=args.bf16)
         peft_config = LoraConfig(

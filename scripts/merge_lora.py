@@ -4,7 +4,7 @@ Most first-stage runs can evaluate the adapter directly with scripts/eval_model.
 Merge only when an external benchmark harness cannot load LoRA adapters.
 
 Example:
-    python scripts/merge_lora.py --base Qwen/Qwen3.5-2B-Base \
+    python scripts/merge_lora.py --base Qwen/Qwen3.5-2B \
         --adapter outputs/qwen3_5_2b_grpo --out outputs/qwen3_5_2b_merged
 """
 import argparse

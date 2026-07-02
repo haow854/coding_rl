@@ -3,7 +3,8 @@
 Verifiable and execution-based. Dense (partial credit by fraction of tests
 passed) so even smaller models get a gradient signal, with a bonus for fully
 solving and penalties for not running / timing out. A light format term
-encourages a clean ```python block (and optionally `<think>` reasoning).
+encourages a clean ```python block. Thinking rewards are kept as an explicit
+ablation knob, but default to off for the post-trained direct-GRPO route.
 
 Hidden tests are the real defense against reward hacking; the cheat tripwires
 below only zero-out the most blatant cases.
@@ -45,7 +46,7 @@ class RewardConfig:
     not_run_penalty: float = -1.0
     timeout_penalty: float = -1.0
     format_bonus: float = 0.05   # clean ```python block present
-    think_bonus: float = 0.05    # non-empty <think>...</think> reasoning present
+    think_bonus: float = 0.0     # optional ablation: non-empty <think>...</think>
     cheat_penalty: float = -1.0
 
 

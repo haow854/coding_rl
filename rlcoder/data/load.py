@@ -59,13 +59,17 @@ def load_hf(
 
 
 def load_cots(
-    config: str = "solutions_py_decontaminated",
+    config: str = "solutions_w_editorials_py_decontaminated",
     split: str = "train",
     limit: Optional[int] = None,
     max_tests: Optional[int] = 15,
+    max_completion_tokens: Optional[int] = 5500,
 ) -> List[Problem]:
     """Load open-r1/codeforces-cots: gold_solution carries a full <think>+code
-    reasoning trace (distilled from R1), not a bare reference solution."""
+    reasoning trace (distilled from R1), not a bare reference solution.
+    max_completion_tokens drops rows whose trace is too long to train on --
+    R1 CoT length is heavily right-skewed (hard problems can run 15k+ tokens),
+    see rlcoder/data/parse_cots.py."""
     from datasets import load_dataset  # heavy dep; only available on the GPU box
 
     from rlcoder.data.parse_cots import cots_row_to_problem
@@ -73,12 +77,23 @@ def load_cots(
     ds = load_dataset("open-r1/codeforces-cots", config, split=split,
                       streaming=limit is not None)
     out: List[Problem] = []
+    seen = too_long = 0
     for row in ds:
-        p = cots_row_to_problem(row, max_tests=max_tests)
+        seen += 1
+        p = cots_row_to_problem(row, max_tests=max_tests,
+                                max_completion_tokens=max_completion_tokens)
         if p is not None:
             out.append(p)
+        elif max_completion_tokens is not None:
+            # would this row have been kept if not for the length cap?
+            if cots_row_to_problem(row, max_tests=max_tests,
+                                   max_completion_tokens=None) is not None:
+                too_long += 1
         if limit is not None and len(out) >= limit:
             break
+    if too_long:
+        print(f"[load_cots] kept {len(out)}/{seen}; dropped {too_long} for "
+              f"exceeding max_completion_tokens={max_completion_tokens}")
     return out
 
 

@@ -1,7 +1,14 @@
 """Map an open-r1/codeforces-cots row to a normalised Problem.
 
 Known compatible dataset/config:
-    open-r1/codeforces-cots, config="solutions_py_decontaminated"
+    open-r1/codeforces-cots, config="solutions_w_editorials_py_decontaminated"
+    (R1 is prompted with the human-written editorial before it reasons, which
+    empirically gives much cleaner traces than the plain "solutions_py_*"
+    config -- that one lets R1 search blind, and on hard problems a real
+    fraction of its traces devolve into unproductive "wait, let me
+    reconsider..." loops that end in a guess rather than a derivation. Also
+    compatible with any other config sharing the same row schema, e.g.
+    "solutions_py_decontaminated".)
 
 Unlike parse.py's row_to_problem (PrimeIntellect schema, gold_solution = bare
 code), gold_solution here is the FULL assistant turn: a <think>...</think>
@@ -34,8 +41,25 @@ def _assistant_content(row: dict) -> Optional[str]:
     return None
 
 
-def cots_row_to_problem(row: dict, max_tests: Optional[int] = 15) -> Optional[Problem]:
-    """Returns None if the row has no public tests or no assistant CoT turn."""
+def _completion_tokens(row: dict, gold: str) -> float:
+    """Prefer the token count recorded at generation time; fall back to a
+    chars-per-token estimate if api_metadata is missing."""
+    n = (row.get("api_metadata") or {}).get("completion_tokens")
+    return float(n) if n is not None else len(gold) / 3.2
+
+
+def cots_row_to_problem(
+    row: dict,
+    max_tests: Optional[int] = 15,
+    max_completion_tokens: Optional[int] = 5500,
+) -> Optional[Problem]:
+    """Returns None if the row has no public tests, no assistant CoT turn, or
+    (when max_completion_tokens is set) the reasoning trace is too long for the
+    training sequence budget. R1-distilled CoT length is heavily right-skewed —
+    most problems land under ~1500 tokens but hard ones run past 15k — so this
+    is a real filter, not a formality; without it, long rows get silently
+    truncated mid-reasoning (before the code block) or dropped by the trainer,
+    depending on TRL version."""
     pt = row.get("public_tests") or {}
     inputs = pt.get("input") or []
     outputs = pt.get("output") or []
@@ -47,6 +71,9 @@ def cots_row_to_problem(row: dict, max_tests: Optional[int] = 15) -> Optional[Pr
 
     gold = _assistant_content(row)
     if not gold:
+        return None
+
+    if max_completion_tokens is not None and _completion_tokens(row, gold) > max_completion_tokens:
         return None
 
     return Problem(
