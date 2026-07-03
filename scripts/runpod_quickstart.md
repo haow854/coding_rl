@@ -141,8 +141,9 @@ Start without an init adapter:
 ```bash
 python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B \
   --data data/grpo_train_probe.jsonl --limit 256 \
-  --num-generations 8 --per-device-batch 8 --grad-accum 4 \
-  --max-prompt 1536 --max-completion 1024 --lr 5e-6 \
+  --num-generations 4 --per-device-batch 4 --grad-accum 8 \
+  --max-prompt 1536 --max-completion 512 --lr 5e-6 \
+  --lora-r 8 \
   --max-steps 100 \
   --bf16 --gradient-checkpointing \
   --output outputs/qwen3_5_2b_grpo_smoke
@@ -158,15 +159,17 @@ Use the filtered training pool:
 ```bash
 python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B \
   --data data/grpo_train.jsonl \
-  --num-generations 8 --per-device-batch 8 --grad-accum 4 \
-  --max-prompt 1536 --max-completion 1024 --lr 5e-6 \
+  --num-generations 4 --per-device-batch 4 --grad-accum 8 \
+  --max-prompt 1536 --max-completion 768 --lr 5e-6 \
+  --lora-r 8 \
   --epochs 1 \
   --bf16 --gradient-checkpointing \
   --output outputs/qwen3_5_2b_grpo
 ```
 
 If reward improves and you have enough GPU headroom, raise `--max-completion`
-to 1536 or `--grad-accum` to 8.
+to 1024. Use `--num-generations 8 --per-device-batch 8` on a larger GPU
+(roughly 40G+), not on a tight 24G smoke run.
 
 ## 7. Final eval
 
