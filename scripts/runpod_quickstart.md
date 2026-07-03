@@ -151,6 +151,14 @@ python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B \
 
 Success criterion: reward mean should not collapse, `reward_std` should not be
 zero for nearly every group, and completions should not grow uncontrollably.
+Metrics are written to `<output>/metrics.jsonl`; a plot is written to
+`<output>/metrics.png` when training ends. If you need to redraw it later:
+
+```bash
+python scripts/plot_metrics.py \
+  --in outputs/qwen3_5_2b_grpo_smoke/metrics.jsonl \
+  --out outputs/qwen3_5_2b_grpo_smoke/metrics.png
+```
 
 ## 6. GRPO first real run
 

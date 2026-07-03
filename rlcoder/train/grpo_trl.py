@@ -28,6 +28,7 @@ per_device_batch * grad_accum * world_size / num_generations.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 
@@ -65,6 +66,82 @@ def build_hf_dataset(data_path: str, limit, processing_class=None,
     return Dataset.from_list(rows)
 
 
+def _plot_metrics(metrics_path: str, png_path: str) -> None:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] could not plot metrics: {e}")
+        return
+
+    rows = []
+    with open(metrics_path, encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                rows.append(json.loads(line))
+    if not rows:
+        return
+
+    def series(key):
+        xs, ys = [], []
+        for row in rows:
+            if key in row:
+                try:
+                    ys.append(float(row[key]))
+                    xs.append(int(row.get("step", len(xs))))
+                except (TypeError, ValueError):
+                    pass
+        return xs, ys
+
+    plots = [
+        ("reward", "reward"),
+        ("reward_std", "reward std"),
+        ("frac_reward_zero_std", "zero-std frac"),
+        ("completions/mean_length", "mean completion len"),
+        ("completions/clipped_ratio", "clipped ratio"),
+        ("loss", "loss"),
+    ]
+
+    fig, axes = plt.subplots(3, 2, figsize=(12, 9))
+    for ax, (key, title) in zip(axes.flatten(), plots):
+        xs, ys = series(key)
+        ax.set_title(title)
+        if xs:
+            ax.plot(xs, ys)
+        ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(png_path) or ".", exist_ok=True)
+    fig.savefig(png_path, dpi=160)
+    plt.close(fig)
+    print(f"wrote metrics plot -> {png_path}")
+
+
+def make_jsonl_metrics_callback(base_cls, path: str, plot_path: str | None = None):
+    class JsonlMetricsCallback(base_cls):
+        def __init__(self):
+            self.path = path
+            self.plot_path = plot_path
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, "w", encoding="utf-8"):
+                pass
+
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            if not logs:
+                return
+            row = {"step": state.global_step}
+            row.update(logs)
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+        def on_train_end(self, args, state, control, **kwargs):
+            if self.plot_path:
+                _plot_metrics(self.path, self.plot_path)
+
+    return JsonlMetricsCallback()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="Qwen/Qwen3.5-2B")
@@ -95,12 +172,19 @@ def main() -> None:
     ap.add_argument("--log-steps", type=int, default=1)
     ap.add_argument("--log-completions", action="store_true",
                     help="Print TRL's rich completion table during training.")
+    ap.add_argument("--metrics-jsonl", default=None,
+                    help="Path for per-log metrics JSONL. Defaults to "
+                         "<output>/metrics.jsonl.")
+    ap.add_argument("--metrics-plot", default=None,
+                    help="Path for an automatic metrics PNG. Defaults to "
+                         "<output>/metrics.png.")
     args = ap.parse_args()
 
     import inspect
     from dataclasses import fields as _fields
 
     from peft import LoraConfig
+    from transformers import TrainerCallback
     from trl import GRPOConfig, GRPOTrainer
 
     from rlcoder.prompting import load_processing_class
@@ -187,6 +271,10 @@ def main() -> None:
         trainer_kwargs["tokenizer"] = processing_class
 
     trainer = GRPOTrainer(**trainer_kwargs)
+    metrics_jsonl = args.metrics_jsonl or os.path.join(args.output, "metrics.jsonl")
+    metrics_plot = args.metrics_plot or os.path.join(args.output, "metrics.png")
+    callback = make_jsonl_metrics_callback(TrainerCallback, metrics_jsonl, metrics_plot)
+    trainer.add_callback(callback)
     trainer.train()
     trainer.save_model(args.output)
     print(f"saved LoRA adapter -> {args.output}")
