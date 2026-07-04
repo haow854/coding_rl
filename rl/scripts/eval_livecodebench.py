@@ -33,12 +33,14 @@ from typing import List, Optional
 
 INSTALL_HELP = """Official LiveCodeBench is not importable.
 
-Install it on the RunPod box, for example:
+The wrapper needs the official LiveCodeBench source tree, because upstream's
+package metadata currently omits subpackages like `lcb_runner.runner`.
+Clone it next to this repo, for example:
 
     cd /workspace/coding_rl
-    python -m pip install -r requirements.txt
+    git clone https://github.com/LiveCodeBench/LiveCodeBench.git
 
-If you already cloned it, pass --lcb-root /workspace/LiveCodeBench.
+Or pass --lcb-root /path/to/LiveCodeBench.
 """
 
 
@@ -112,30 +114,74 @@ def _parse_args() -> argparse.Namespace:
     return ap.parse_args()
 
 
-def _ensure_lcb_importable(lcb_root: Optional[str]) -> Path:
+def _purge_lcb_modules() -> None:
+    for name in list(sys.modules):
+        if name == "lcb_runner" or name.startswith("lcb_runner."):
+            del sys.modules[name]
+
+
+def _candidate_lcb_roots(lcb_root: Optional[str]) -> List[Path]:
+    roots: List[Path] = []
     if lcb_root:
-        root = Path(lcb_root).expanduser().resolve()
+        roots.append(Path(lcb_root).expanduser())
+
+    script_path = Path(__file__).resolve()
+    search_bases = [Path.cwd(), *script_path.parents]
+    for base in search_bases:
+        roots.append(base / "LiveCodeBench")
+        if base.name == "coding_rl":
+            roots.append(base.parent / "LiveCodeBench")
+    roots.append(Path("/workspace/coding_rl/LiveCodeBench"))
+    roots.append(Path("/workspace/LiveCodeBench"))
+
+    seen = set()
+    out = []
+    for root in roots:
+        try:
+            resolved = root.resolve()
+        except OSError:
+            resolved = root
+        if resolved not in seen:
+            out.append(resolved)
+            seen.add(resolved)
+    return out
+
+
+def _looks_like_lcb_source(root: Path) -> bool:
+    return (
+        (root / "lcb_runner" / "runner" / "main.py").is_file()
+        and (root / "lcb_runner" / "prompts" / "few_shot_examples"
+             / "generation" / "func.json").is_file()
+    )
+
+
+def _ensure_lcb_importable(lcb_root: Optional[str]) -> Path:
+    for root in _candidate_lcb_roots(lcb_root):
+        if not _looks_like_lcb_source(root):
+            continue
+        _purge_lcb_modules()
         sys.path.insert(0, str(root))
-    try:
-        import lcb_runner
-    except ModuleNotFoundError as exc:
-        raise SystemExit(INSTALL_HELP) from exc
+        spec = importlib.util.find_spec("lcb_runner.runner.main")
+        if spec is not None:
+            print(f"[lcb-official] using LiveCodeBench source: {root}")
+            return root
 
-    if getattr(lcb_runner, "__file__", None):
-        return Path(lcb_runner.__file__).resolve().parent.parent
+    _purge_lcb_modules()
+    spec = importlib.util.find_spec("lcb_runner.runner.main")
+    if spec is not None and spec.origin:
+        root = Path(spec.origin).resolve().parents[2]
+        print(f"[lcb-official] using installed LiveCodeBench source: {root}")
+        return root
 
-    pkg_paths = list(getattr(lcb_runner, "__path__", []) or [])
-    if pkg_paths:
-        return Path(pkg_paths[0]).resolve().parent
-
-    spec = importlib.util.find_spec("lcb_runner")
-    if spec and spec.submodule_search_locations:
-        return Path(list(spec.submodule_search_locations)[0]).resolve().parent
-    if spec and spec.origin:
-        return Path(spec.origin).resolve().parent.parent
-
-    raise SystemExit("Could not locate the LiveCodeBench package root. "
-                     "Pass --lcb-root /workspace/LiveCodeBench.")
+    searched = "\n".join(f"  - {p}" for p in _candidate_lcb_roots(lcb_root))
+    raise SystemExit(
+        INSTALL_HELP
+        + "\nSearched these source roots:\n"
+        + searched
+        + "\n\nNote: `pip install git+https://github.com/LiveCodeBench/LiveCodeBench.git` "
+          "can install a partial package that lacks `lcb_runner.runner`; the source "
+          "checkout is required."
+    )
 
 
 def _auto_style(model: str) -> str:

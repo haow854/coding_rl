@@ -23,6 +23,15 @@ vllm>=0.10
 flashinfer-python
 nvidia-cuda-nvrtc
 
-# Evaluation harnesses
+# Evaluation harnesses. LiveCodeBench itself is used from a source checkout at
+# ./LiveCodeBench because upstream packaging currently omits lcb_runner
+# subpackages from the pip install.
 evalplus>=0.3.1
-git+https://github.com/LiveCodeBench/LiveCodeBench.git
+pebble>=5.1.0
+annotated-types>=0.7.0
+openai>=1.59.6
+anthropic>=0.42.0
+cohere>=5.13.6
+google-genai>=0.6.0
+mistralai==0.4.2
+together>=0.21.0
