@@ -185,6 +185,10 @@ def _patch_vllm(args: argparse.Namespace) -> None:
         ) from exc
 
     original_sampling_params = vllm.SamplingParams
+    # Import LLM before monkey-patching SamplingParams. vLLM imports its own
+    # SamplingParams in type annotations such as `SamplingParams | None`; if the
+    # class has already been replaced by our wrapper function, that import fails.
+    original_llm = vllm.LLM
 
     def sampling_params(*pos, **kwargs):
         if args.top_k > 0:
@@ -192,14 +196,6 @@ def _patch_vllm(args: argparse.Namespace) -> None:
         return original_sampling_params(*pos, **kwargs)
 
     vllm.SamplingParams = sampling_params
-    try:
-        import vllm.sampling_params as sampling_params_mod
-
-        sampling_params_mod.SamplingParams = sampling_params
-    except Exception:  # noqa: BLE001
-        pass
-
-    original_llm = vllm.LLM
 
     def llm(*pos, **kwargs):
         if args.max_model_len is not None and not kwargs.get("max_model_len"):
