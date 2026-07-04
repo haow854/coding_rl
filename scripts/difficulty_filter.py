@@ -25,9 +25,15 @@ from dataclasses import asdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# vLLM 0.24's FlashInfer sampler path mis-detects RTX 5090/sm120 and can also
-# crash when flashinfer is absent. Disable it before importing vLLM.
-os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+# FlashInfer's sampler crashes on Blackwell/sm120 (e.g. RTX 5090) but is much
+# faster on A100/H100. Disable it only on that arch, before importing vLLM.
+if "VLLM_USE_FLASHINFER_SAMPLER" not in os.environ:
+    try:
+        import torch as _torch
+        if _torch.cuda.get_device_capability()[0] == 12:
+            os.environ["VLLM_USE_FLASHINFER_SAMPLER"] = "0"
+    except Exception:
+        pass
 
 from rlcoder.data.load import load_clean_jsonl       # noqa: E402
 from rlcoder.prompting import build_messages, load_processing_class, render_chat_prompt  # noqa: E402

@@ -20,10 +20,17 @@ def generate(
     max_lora_rank: int = 32,
     seed: int = 0,
 ) -> List[List[str]]:
-    # vLLM 0.24's FlashInfer sampler path mis-detects RTX 5090/sm120 and can
-    # also crash when flashinfer is absent. Triton/native sampling is slower but
-    # reliable for eval and probing.
-    os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+    # FlashInfer's sampler crashes on Blackwell/sm120 (e.g. RTX 5090) but is MUCH
+    # faster than the native Triton top-k/top-p kernel on A100/H100 (the native
+    # path JIT-recompiles per shape and tanks batched throughput). Disable it
+    # only on the broken arch; an explicit env override always wins.
+    if "VLLM_USE_FLASHINFER_SAMPLER" not in os.environ:
+        try:
+            import torch
+            if torch.cuda.get_device_capability()[0] == 12:
+                os.environ["VLLM_USE_FLASHINFER_SAMPLER"] = "0"
+        except Exception:  # noqa: BLE001
+            pass
 
     from vllm import LLM, SamplingParams
     from rlcoder.prompting import load_processing_class, render_chat_prompt
