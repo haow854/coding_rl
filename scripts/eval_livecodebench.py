@@ -35,27 +35,51 @@ from rlcoder.eval.run_eval import evaluate            # noqa: E402
 
 
 def _load_lcb(version_tag: str, split: str):
-    """LCB's layout has shifted across releases; try the known call shapes."""
+    """Load LCB, surviving both the old script loader and datasets>=4.0.
+
+    datasets 4.x dropped trust_remote_code script loading, which LCB still uses,
+    so fall back to reading the versioned raw jsonl straight from the repo
+    (release_vN = test.jsonl + test2..testN.jsonl).
+    """
     from datasets import load_dataset
 
-    errors = []
-    attempts = (
+    for call in (
         lambda: load_dataset("livecodebench/code_generation_lite",
                              version_tag=version_tag, split=split, trust_remote_code=True),
         lambda: load_dataset("livecodebench/code_generation_lite",
                              version_tag, split=split, trust_remote_code=True),
-        lambda: load_dataset("livecodebench/code_generation_lite",
-                             version_tag, split=split),
-    )
-    for attempt in attempts:
+    ):
         try:
-            return attempt()
-        except Exception as e:  # noqa: BLE001
-            errors.append(str(e).splitlines()[-1] if str(e) else repr(e))
-    raise SystemExit("could not load LiveCodeBench code_generation_lite "
-                     f"(version_tag={version_tag}, split={split}):\n  " +
-                     "\n  ".join(errors) +
-                     "\nTip: keep datasets<4.0, or `pip install livecodebench`.")
+            return call()
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        n = int(version_tag.rsplit("v", 1)[-1])
+    except Exception:  # noqa: BLE001
+        raise SystemExit(f"can't parse --version-tag {version_tag!r} (expected e.g. release_v5)")
+    from huggingface_hub import hf_hub_download
+
+    names = ["test.jsonl"] + [f"test{i}.jsonl" for i in range(2, n + 1)]
+    rows, got = [], []
+    for name in names:
+        try:
+            path = hf_hub_download("livecodebench/code_generation_lite", name,
+                                   repo_type="dataset")
+        except Exception:  # noqa: BLE001
+            continue
+        got.append(name)
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    rows.append(json.loads(line))
+    if not rows:
+        raise SystemExit(
+            "could not load LiveCodeBench (script path failed and no raw jsonl found).\n"
+            "Try `pip install \"datasets<4.0\"` or `pip install livecodebench`.")
+    print(f"[lcb] loaded {len(rows)} rows from raw jsonl {got} (datasets>=4.0 path)")
+    return rows
 
 
 def _decode_tests(raw):

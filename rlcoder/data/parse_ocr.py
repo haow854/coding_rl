@@ -21,6 +21,7 @@ path expecting a pass/fail signal; use the verifiable-coding pool for that.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Optional
 
@@ -82,5 +83,10 @@ def ocr_row_to_problem(row: dict) -> Optional[Problem]:
 
 
 def problem_group_key(problem: Problem) -> str:
-    """Stable per-problem key for de-duplication (OCR ids are per-solution)."""
-    return re.sub(r"\s+", " ", problem.statement).strip().lower()[:512]
+    """Stable per-problem key for de-duplication (OCR ids are per-solution).
+
+    Hash the WHOLE normalised statement. A truncated prefix collided distinct
+    problems that share a boilerplate intro, silently dropping unique problems.
+    """
+    norm = re.sub(r"\s+", " ", problem.statement).strip().lower()
+    return hashlib.md5(norm.encode("utf-8")).hexdigest()

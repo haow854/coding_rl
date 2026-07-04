@@ -76,8 +76,8 @@ def main() -> None:
     ap.add_argument("--config", default="split_0",
                     help="OCR exposes split_0/split_1 as CONFIGS; split_0 is "
                          "self-contained (carries the problem text).")
-    ap.add_argument("--split", default="train",
-                    help="Split name inside the config.")
+    ap.add_argument("--split", default="split_0",
+                    help="Split name inside the config (OCR: split_0, not train).")
     ap.add_argument("--out", default="data/sft_ocr.jsonl")
     ap.add_argument("--solutions-per-problem", type=int, default=1,
                     help="Keep the k shortest traces per unique problem.")

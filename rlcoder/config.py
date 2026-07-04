@@ -29,7 +29,7 @@ class SFTDataConfig:
     """Stage-1 distillation SFT data — built by scripts/build_sft_data.py."""
     dataset: str = "nvidia/OpenCodeReasoning"
     dataset_config: str = "split_0"   # OCR exposes split_0/split_1 as configs, not splits
-    dataset_split: str = "train"      # self-contained config: carries the problem text inline
+    dataset_split: str = "split_0"    # the split inside that config is also named split_0
     solutions_per_problem: int = 1    # coverage first: keep the shortest trace(s)/problem
     drop_longest_frac: float = 0.15   # trim the meandering long tail
     max_trace_chars: int = 48000      # hard cap (~15k tokens) applied before the frac trim
