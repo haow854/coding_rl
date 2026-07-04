@@ -66,6 +66,8 @@ def main() -> None:
                          "mid-reasoning and teaches the model never to stop.")
     ap.add_argument("--lr", type=float, default=1e-4,
                     help="LoRA default; pass ~1e-5 with --full-ft.")
+    ap.add_argument("--optim", default="adamw_torch",
+                    help="Use adamw_8bit (needs bitsandbytes) if full-FT OOMs.")
     ap.add_argument("--epochs", type=float, default=2.0)
     ap.add_argument("--max-steps", type=int, default=-1)
     ap.add_argument("--lora-r", type=int, default=32)
@@ -115,6 +117,10 @@ def main() -> None:
         max_length=args.max_length,
         num_train_epochs=args.epochs,
         max_steps=args.max_steps,
+        lr_scheduler_type="cosine",
+        warmup_ratio=0.03,
+        optim=args.optim,
+        max_grad_norm=1.0,
         bf16=args.bf16,
         gradient_checkpointing=args.gradient_checkpointing,
         packing=args.packing,
