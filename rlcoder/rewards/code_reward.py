@@ -29,9 +29,20 @@ _CHEAT_PATTERNS = [
 
 
 def extract_code(text: str) -> str:
-    """Pull the python code out of a model completion (```python ... ``` if present)."""
-    m = _CODE_FENCE.search(text)
-    return (m.group(1) if m else text).strip()
+    """Pull the final python program out of a model completion.
+
+    Thinking models emit a <think>...</think> trace that often contains
+    intermediate code snippets; judge only the answer *after* the reasoning, and
+    prefer the LAST fenced block (the final solution). Falls back to the raw text
+    when there is no closing </think> (e.g. a truncated completion) or no fence —
+    those are failures the sandbox will reject anyway.
+    """
+    if "</think>" in text:
+        text = text.rsplit("</think>", 1)[1]
+    blocks = _CODE_FENCE.findall(text)
+    if blocks:
+        return blocks[-1].strip()
+    return text.strip()
 
 
 def has_think(text: str) -> bool:

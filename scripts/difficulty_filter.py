@@ -6,10 +6,15 @@ All-fail and all-pass problems give weak GRPO signal, so drop them for the
 first clean run. Output is the curated training pool. Runs on the GPU box
 (vLLM).
 
-    python scripts/difficulty_filter.py --model Qwen/Qwen3.5-2B \
+    python scripts/difficulty_filter.py --model Qwen/Qwen3-4B \
+        --lora outputs/qwen3_4b_sft \
         --in data/rl_pool.jsonl --out data/grpo_train.jsonl \
         --save-rollouts outputs/filter_rollouts.jsonl \
-        --k 4 --keep-lo 1 --keep-hi 3 --max-tokens 1536
+        --k 8 --keep-lo 1 --keep-hi 7 --max-tokens 8192
+
+Probe with the SAME policy GRPO will start from (the SFT adapter via --lora) and
+the SAME max-tokens as GRPO's --max-completion, or the kept difficulty band
+won't match what the trainer actually sees.
 """
 import argparse
 import json
@@ -19,6 +24,10 @@ from collections import Counter
 from dataclasses import asdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# vLLM 0.24's FlashInfer sampler path mis-detects RTX 5090/sm120 and can also
+# crash when flashinfer is absent. Disable it before importing vLLM.
+os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
 
 from rlcoder.data.load import load_clean_jsonl       # noqa: E402
 from rlcoder.prompting import build_messages, load_processing_class, render_chat_prompt  # noqa: E402
@@ -80,7 +89,7 @@ def _score_with_progress(comps, tests, modes, args):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="Qwen/Qwen3.5-2B")
+    ap.add_argument("--model", default="Qwen/Qwen3-4B")
     ap.add_argument("--lora", default=None,
                     help="Optional LoRA adapter used while probing difficulty.")
     ap.add_argument("--in", dest="inp", default="data/rl_pool.jsonl")
@@ -91,11 +100,13 @@ def main() -> None:
     ap.add_argument("--load-rollouts", default=None,
                     help="Read previously saved rollouts and only redo sandbox "
                          "scoring/filtering. Use with the same --in ordering.")
-    ap.add_argument("--k", type=int, default=4)
+    ap.add_argument("--k", type=int, default=8)
     ap.add_argument("--keep-lo", type=int, default=1)
-    ap.add_argument("--keep-hi", type=int, default=3)
+    ap.add_argument("--keep-hi", type=int, default=7)
     ap.add_argument("--max-problems", type=int, default=None)
-    ap.add_argument("--max-tokens", type=int, default=1536)
+    ap.add_argument("--max-tokens", type=int, default=8192,
+                    help="Probe in thinking mode with room to finish; match the "
+                         "GRPO --max-completion.")
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--max-model-len", type=int, default=8192)
     ap.add_argument("--gpu-mem-util", type=float, default=0.90)

@@ -1,25 +1,27 @@
-"""Single-turn GRPO (RLVR) training with TRL + LoRA on the GPU box.
+"""Single-turn GRPO (RLVR) training with TRL on the GPU box.
 
-Main route: start from the post-trained Qwen3.5-2B checkpoint directly. Do not
-attach the old Base SFT adapter to this model.
+Stage-2 route: start from the Stage-1 SFT checkpoint. Pass the SFT LoRA adapter
+via --init-adapter to continue training it, or --full-ft for full-parameter RL.
 
-Smoke run:
-    python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B \
+Smoke run (continue the SFT adapter):
+    python rlcoder/train/grpo_trl.py --model Qwen/Qwen3-4B \
+        --init-adapter outputs/qwen3_4b_sft \
         --data data/grpo_train.jsonl --limit 256 \
-        --num-generations 4 --per-device-batch 4 --max-completion 512 \
-        --lora-r 8 --max-steps 100 --bf16
+        --num-generations 4 --per-device-batch 4 --max-completion 4096 \
+        --max-steps 100 --bf16 --gradient-checkpointing
 
 First real run:
-    python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B \
-        --data data/grpo_train.jsonl \
-        --num-generations 4 --per-device-batch 4 --max-completion 1024 \
+    python rlcoder/train/grpo_trl.py --model Qwen/Qwen3-4B \
+        --init-adapter outputs/qwen3_4b_sft --data data/grpo_train.jsonl \
+        --num-generations 8 --per-device-batch 8 --max-completion 4096 \
         --epochs 1 --bf16 --gradient-checkpointing \
-        --output outputs/qwen3_5_2b_grpo
+        --output outputs/qwen3_4b_grpo
 
-Targets TRL >= 0.15 (GRPOConfig / GRPOTrainer). A few defaults are already
-DAPO-flavoured: beta=0 (no KL), loss_type="dr_grpo" (no length bias), and
-epsilon_high>epsilon (clip-higher). Field names evolve across TRL versions, so
-we keep only fields supported by the installed version.
+Targets TRL >= 0.15 (GRPOConfig / GRPOTrainer). Defaults are DAPO-flavoured:
+loss_type="dr_grpo" (no length bias) and epsilon_high>epsilon (clip-higher),
+plus a small KL (beta) as a stability anchor for a small student — set --beta 0
+for pure DAPO. Field names evolve across TRL versions, so we keep only fields
+supported by the installed version.
 
 Batch math: per_device_train_batch_size counts generations and must be
 divisible by num_generations; unique prompts per optimizer step =
@@ -144,7 +146,7 @@ def make_jsonl_metrics_callback(base_cls, path: str, plot_path: str | None = Non
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="Qwen/Qwen3.5-2B")
+    ap.add_argument("--model", default="Qwen/Qwen3-4B")
     ap.add_argument("--init-adapter", default=None,
                     help="Optional LoRA adapter to continue from; leave unset "
                          "for the main post-trained direct-GRPO route.")
@@ -155,15 +157,21 @@ def main() -> None:
     ap.add_argument("--per-device-batch", type=int, default=4)
     ap.add_argument("--grad-accum", type=int, default=4)
     ap.add_argument("--max-prompt", type=int, default=1536)
-    ap.add_argument("--max-completion", type=int, default=1024)
+    ap.add_argument("--max-completion", type=int, default=4096,
+                    help="Thinking traces are long; 1024 truncated ~half of them "
+                         "and destroyed the reward signal. Raise to 8192 if VRAM "
+                         "allows, or lower --num-generations to afford it.")
     ap.add_argument("--lr", type=float, default=5e-6)
     ap.add_argument("--epochs", type=float, default=1.0)
     ap.add_argument("--max-steps", type=int, default=-1)
     ap.add_argument("--temperature", type=float, default=1.0)
-    ap.add_argument("--beta", type=float, default=0.0, help="KL coeff; 0 = DAPO-style")
+    ap.add_argument("--beta", type=float, default=0.001,
+                    help="KL coeff; small anchor for a small student. 0 = pure DAPO.")
     ap.add_argument("--loss-type", default="dr_grpo", help="grpo | dr_grpo | bnpo | dapo")
     ap.add_argument("--epsilon-high", type=float, default=0.28, help="DAPO clip-higher")
-    ap.add_argument("--lora-r", type=int, default=16)
+    ap.add_argument("--lora-r", type=int, default=32)
+    ap.add_argument("--full-ft", action="store_true",
+                    help="Full-parameter GRPO instead of LoRA (needs more VRAM).")
     ap.add_argument("--reward-timeout", type=float, default=10.0)
     ap.add_argument("--use-vllm", action="store_true")
     ap.add_argument("--bf16", action="store_true")
@@ -212,13 +220,17 @@ def main() -> None:
         print(f"continuing GRPO from adapter: {args.init_adapter}")
     else:
         model = load_base_model(args.model, bf16=args.bf16)
-        peft_config = LoraConfig(
-            r=args.lora_r,
-            lora_alpha=2 * args.lora_r,
-            lora_dropout=0.0,
-            target_modules="all-linear",
-            task_type="CAUSAL_LM",
-        )
+        if args.full_ft:
+            peft_config = None
+            print("full-parameter GRPO (no LoRA adapter)")
+        else:
+            peft_config = LoraConfig(
+                r=args.lora_r,
+                lora_alpha=2 * args.lora_r,
+                lora_dropout=0.0,
+                target_modules="all-linear",
+                task_type="CAUSAL_LM",
+            )
     if args.gradient_checkpointing and hasattr(model, "config"):
         model.config.use_cache = False
 

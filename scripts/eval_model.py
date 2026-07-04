@@ -1,13 +1,13 @@
 """Evaluate a model on a normalised problem JSONL (our sandbox judge) — use this
 for the in-house competitive held-out set and for base-vs-RL comparison.
 
-    # baseline (base model, greedy-ish pass@1)
-    python scripts/eval_model.py --model Qwen/Qwen3.5-2B \
+    # baseline (base model), pass@1 and pass@5 estimated from n samples
+    python scripts/eval_model.py --model Qwen/Qwen3-4B \
         --data data/holdout.jsonl --out outputs/eval/base.json
 
-    # after RL (LoRA adapter), pass@1 and pass@5
-    python scripts/eval_model.py --model Qwen/Qwen3.5-2B --lora outputs/qwen3_5_2b_grpo \
-        --data data/holdout.jsonl --n 5 --temperature 0.8 --ks 1,5 --out outputs/eval/rl.json
+    # after SFT/GRPO (LoRA adapter) — keep sampling identical to the baseline
+    python scripts/eval_model.py --model Qwen/Qwen3-4B --lora outputs/qwen3_4b_grpo \
+        --data data/holdout.jsonl --out outputs/eval/rl.json
 """
 import argparse
 import json
@@ -26,10 +26,13 @@ def main() -> None:
     ap.add_argument("--lora", default=None)
     ap.add_argument("--data", default="data/holdout.jsonl")
     ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--n", type=int, default=1)
-    ap.add_argument("--temperature", type=float, default=0.2)
-    ap.add_argument("--max-tokens", type=int, default=2048)
-    ap.add_argument("--ks", default="1")
+    ap.add_argument("--n", type=int, default=8,
+                    help="Samples/problem. >1 gives a low-variance pass@1 estimate; "
+                         "single greedy pass@1 is too noisy for small deltas.")
+    ap.add_argument("--temperature", type=float, default=0.8)
+    ap.add_argument("--max-tokens", type=int, default=8192,
+                    help="Thinking eval truncates below this and tanks the score.")
+    ap.add_argument("--ks", default="1,5")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 

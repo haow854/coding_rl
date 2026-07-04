@@ -2,7 +2,7 @@
 These are function-completion (assert-judged), NOT stdin/stdout — so they use a
 different prompt from training. This is only a "did we break the basics?" check.
 
-    python scripts/eval_evalplus.py --model Qwen/Qwen3.5-2B \
+    python scripts/eval_evalplus.py --model Qwen/Qwen3-4B \
         --dataset humaneval --out outputs/eval/he_base.jsonl
     evalplus.evaluate --dataset humaneval --samples outputs/eval/he_base.jsonl
 """

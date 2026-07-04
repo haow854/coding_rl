@@ -19,7 +19,7 @@ def evaluate(
     n: int = 1,
     temperature: float = 0.2,
     top_p: float = 0.95,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
     lora_path: Optional[str] = None,
     reward_timeout: float = 10.0,
     ks: Sequence[int] = (1,),

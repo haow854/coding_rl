@@ -1,8 +1,8 @@
 """Plot GRPO/SFT JSONL metrics written by training scripts.
 
 Example:
-    python scripts/plot_metrics.py --in outputs/qwen3_5_2b_grpo/metrics.jsonl \
-        --out outputs/qwen3_5_2b_grpo/metrics.png
+    python scripts/plot_metrics.py --in outputs/qwen3_4b_grpo/metrics.jsonl \
+        --out outputs/qwen3_4b_grpo/metrics.png
 """
 import argparse
 import json

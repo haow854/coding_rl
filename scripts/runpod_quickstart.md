@@ -2,19 +2,21 @@
 
 Local dev is CPU-only. Everything below runs on the RunPod GPU box.
 
+The flow is two stages: **Stage 1 = SFT distillation** (the main lift), then
+**Stage 2 = GRPO** continuing the SFT adapter. Keep thinking mode, completion
+length, and eval length consistent across all steps.
+
 ## 0. Model and GPU
 
-Stage 1 starts from the post-trained checkpoint:
-
 ```text
-Qwen/Qwen3.5-2B
+Qwen/Qwen3-4B      # text-native, thinking mode on
 ```
 
-Use a 24G card for smoke tests if cost matters. A 40G card is more comfortable
-for vLLM probing and GRPO with longer completions. An 80G card is convenient,
-but not required for the first 2B run.
-
-Do not attach the old `Qwen/Qwen3.5-2B-Base` SFT adapter to this model.
+SFT trains on long reasoning traces (`--max-length 16384`), and GRPO/eval
+generate long thinking completions (`--max-completion 4096`). A 40G card is a
+comfortable minimum; 80G is convenient for full-parameter runs or
+`--num-generations 8`. LoRA + gradient checkpointing fits a 24-32G card if you
+keep `--per-device-batch` small.
 
 ## 1. Environment
 
@@ -34,190 +36,140 @@ pip install "vllm>=0.10"
 If vLLM tries to downgrade torch or compile forever in a broken image, fix the
 environment before launching long jobs.
 
-## 2. Build verified data
+On RTX 5090 / Blackwell, vLLM 0.24 may mis-detect FlashInfer sampler support.
+This repo disables the FlashInfer sampler in eval/filter scripts by default. If
+you run vLLM manually, use:
 
-Main dataset:
-
-```text
-open-r1/verifiable-coding-problems-python_decontaminated-tested
+```bash
+export VLLM_USE_FLASHINFER_SAMPLER=0
 ```
 
-For the first run, trust the upstream decontaminated/tested rows and normalize
-them locally:
+## 2. Stage 1 — SFT distillation (main)
+
+Curate a compact, coverage-first SFT pool from OpenCodeReasoning (dedup to the
+shortest trace per problem, trim the meandering long tail, difficulty-stratify):
+
+```bash
+python scripts/build_sft_data.py \
+  --split split_0 --target-size 30000 \
+  --out data/sft_ocr.jsonl
+```
+
+Sanity-check the printed distribution first with a small slice
+(`--limit 20000 --target-size 2000`). Then SFT (LoRA):
+
+```bash
+python rlcoder/train/sft_trl.py --model Qwen/Qwen3-4B \
+  --data data/sft_ocr.jsonl \
+  --per-device-batch 1 --grad-accum 16 --max-length 16384 \
+  --lr 1e-4 --epochs 2 --lora-r 32 \
+  --bf16 --gradient-checkpointing --packing \
+  --output outputs/qwen3_4b_sft
+```
+
+Full-parameter instead (needs ~80G; lower the LR): add `--full-ft --lr 1e-5`.
+
+## 3. Stage-1 eval (base vs SFT)
+
+Multi-sample so small deltas are visible; keep sampling identical for both:
+
+```bash
+python scripts/eval_model.py --model Qwen/Qwen3-4B \
+  --data data/dev_internal.jsonl --limit 500 \
+  --out outputs/eval/qwen3_4b_base.json
+
+python scripts/eval_model.py --model Qwen/Qwen3-4B --lora outputs/qwen3_4b_sft \
+  --data data/dev_internal.jsonl --limit 500 \
+  --out outputs/eval/qwen3_4b_sft.json
+```
+
+This is the number that should move most. `eval_model.py` defaults to
+`--n 8 --temperature 0.8 --max-tokens 8192 --ks 1,5`.
+
+## 4. Stage 2 — GRPO pool + difficulty filter (optional)
+
+Build and split the verifiable stdin/stdout pool (this one *does* have tests):
 
 ```bash
 python scripts/build_dataset.py --source hf --limit 15000 --skip-verify \
-  --max-tests 10 --concurrency 64 \
-  --out data/clean_problems.jsonl
-```
+  --max-tests 10 --concurrency 64 --out data/clean_problems.jsonl
 
-Split into internal dev and RL pool. No SFT split is needed for the main route:
-
-```bash
 python scripts/split_stages.py --in data/clean_problems.jsonl \
-  --rl-out data/rl_pool.jsonl \
-  --dev-out data/dev_internal.jsonl \
-  --sft-out data/unused_sft.jsonl \
-  --dev 1000 --sft 0 --seed 0
+  --rl-out data/rl_pool.jsonl --dev-out data/dev_internal.jsonl \
+  --sft-out data/unused_sft.jsonl --dev 1000 --sft 0 --seed 0
 ```
 
-If you want stricter data quality later, rebuild without `--skip-verify`; it is
-slower and CPU-bound:
+Probe with the **SFT adapter** (the policy GRPO will start from) and the **same**
+`--max-tokens` as GRPO's `--max-completion`, so the kept difficulty band matches
+what the trainer actually sees:
 
 ```bash
-python scripts/build_dataset.py --source hf --limit 15000 \
-  --max-tests 10 --concurrency 16 --timeout 5 \
-  --out data/clean_problems_verified.jsonl
-```
-
-## 3. Post-trained baseline eval
-
-Start with `n=1` for a cheap signal:
-
-```bash
-python scripts/eval_model.py --model Qwen/Qwen3.5-2B \
-  --data data/dev_internal.jsonl --limit 200 \
-  --n 1 --temperature 0.2 --ks 1 \
-  --out outputs/eval/qwen3_5_2b_post_dev200.json
-```
-
-Then run a wider sample if the 200-problem result looks sane:
-
-```bash
-python scripts/eval_model.py --model Qwen/Qwen3.5-2B \
-  --data data/dev_internal.jsonl \
-  --n 5 --temperature 0.8 --ks 1,5 \
-  --out outputs/eval/qwen3_5_2b_post_dev1000_n5.json
-```
-
-## 4. Difficulty filter for GRPO
-
-Probe the same post-trained policy and keep problems it solves
-sometimes-but-not-always. These have useful within-prompt reward variance.
-
-Cheap probe:
-
-```bash
-python scripts/difficulty_filter.py --model Qwen/Qwen3.5-2B \
-  --in data/rl_pool.jsonl --out data/grpo_train_probe.jsonl \
-  --save-rollouts outputs/filter_rollouts_probe.jsonl \
-  --max-problems 1000 \
-  --k 8 --keep-lo 1 --keep-hi 7 \
-  --max-tokens 1024 --reward-timeout 3 \
-  --score-concurrency 64 --score-batch-size 512
-```
-
-If the kept count is reasonable, run a larger filter:
-
-```bash
-python scripts/difficulty_filter.py --model Qwen/Qwen3.5-2B \
+python scripts/difficulty_filter.py --model Qwen/Qwen3-4B \
+  --lora outputs/qwen3_4b_sft \
   --in data/rl_pool.jsonl --out data/grpo_train.jsonl \
-  --save-rollouts outputs/filter_rollouts_6k_g8.jsonl \
+  --save-rollouts outputs/filter_rollouts_6k.jsonl \
   --max-problems 6000 \
   --k 8 --keep-lo 1 --keep-hi 7 \
-  --max-tokens 1024 --reward-timeout 3 \
+  --max-tokens 4096 --reward-timeout 3 \
   --score-concurrency 64 --score-batch-size 512
 ```
 
-If scoring is interrupted after rollouts were saved, resume without regenerating:
+Scoring interrupted after rollouts were saved? Resume with
+`--load-rollouts outputs/filter_rollouts_6k.jsonl` (skips regeneration).
+
+## 5. GRPO smoke, then real run
+
+Continue the SFT adapter with `--init-adapter`:
 
 ```bash
-python scripts/difficulty_filter.py --model Qwen/Qwen3.5-2B \
-  --in data/rl_pool.jsonl --out data/grpo_train.jsonl \
-  --load-rollouts outputs/filter_rollouts_6k_g8.jsonl \
-  --max-problems 6000 \
-  --k 8 --keep-lo 1 --keep-hi 7 \
-  --reward-timeout 3 \
-  --score-concurrency 64 --score-batch-size 512
-```
-
-If this keeps too few problems, relax to `--keep-lo 0 --keep-hi 7` for the
-first smoke run, then tighten later.
-
-## 5. GRPO smoke
-
-Start without an init adapter:
-
-```bash
-python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B \
-  --data data/grpo_train_probe.jsonl --limit 256 \
+python rlcoder/train/grpo_trl.py --model Qwen/Qwen3-4B \
+  --init-adapter outputs/qwen3_4b_sft \
+  --data data/grpo_train.jsonl --limit 256 \
   --num-generations 4 --per-device-batch 4 --grad-accum 8 \
-  --max-prompt 1536 --max-completion 512 --lr 5e-6 \
-  --lora-r 8 \
-  --max-steps 100 \
-  --bf16 --gradient-checkpointing \
-  --output outputs/qwen3_5_2b_grpo_smoke
+  --max-prompt 2048 --max-completion 4096 --lr 5e-6 \
+  --max-steps 100 --bf16 --gradient-checkpointing \
+  --output outputs/qwen3_4b_grpo_smoke
 ```
 
-Success criterion: reward mean should not collapse, `reward_std` should not be
-zero for nearly every group, and completions should not grow uncontrollably.
-Metrics are written to `<output>/metrics.jsonl`; a plot is written to
-`<output>/metrics.png` when training ends. If you need to redraw it later:
+Success criterion: reward mean should not collapse, `frac_reward_zero_std`
+should stay well below 1, and **`completions/clipped_ratio` should be small**
+(the old 1024 cap truncated ~half the rollouts — that was the bug). Metrics go to
+`<output>/metrics.jsonl` and a plot to `<output>/metrics.png`.
+
+Real run (larger GPU: `--num-generations 8 --per-device-batch 8`):
 
 ```bash
-python scripts/plot_metrics.py \
-  --in outputs/qwen3_5_2b_grpo_smoke/metrics.jsonl \
-  --out outputs/qwen3_5_2b_grpo_smoke/metrics.png
-```
-
-## 6. GRPO first real run
-
-Use the filtered training pool:
-
-```bash
-python rlcoder/train/grpo_trl.py --model Qwen/Qwen3.5-2B \
+python rlcoder/train/grpo_trl.py --model Qwen/Qwen3-4B \
+  --init-adapter outputs/qwen3_4b_sft \
   --data data/grpo_train.jsonl \
-  --num-generations 4 --per-device-batch 4 --grad-accum 8 \
-  --max-prompt 1536 --max-completion 768 --lr 5e-6 \
-  --lora-r 8 \
-  --epochs 1 \
-  --bf16 --gradient-checkpointing \
-  --output outputs/qwen3_5_2b_grpo
+  --num-generations 8 --per-device-batch 8 --grad-accum 8 \
+  --max-prompt 2048 --max-completion 4096 --lr 5e-6 \
+  --epochs 1 --bf16 --gradient-checkpointing \
+  --output outputs/qwen3_4b_grpo
 ```
 
-If reward improves and you have enough GPU headroom, raise `--max-completion`
-to 1024. Use `--num-generations 8 --per-device-batch 8` on a larger GPU
-(roughly 40G+), not on a tight 24G smoke run.
-
-## 7. Final eval
-
-Evaluate the GRPO adapter against the same dev set:
+## 6. Final eval
 
 ```bash
-python scripts/eval_model.py --model Qwen/Qwen3.5-2B \
-  --lora outputs/qwen3_5_2b_grpo \
+python scripts/eval_model.py --model Qwen/Qwen3-4B \
+  --lora outputs/qwen3_4b_grpo \
   --data data/dev_internal.jsonl \
-  --n 5 --temperature 0.8 --ks 1,5 \
-  --out outputs/eval/qwen3_5_2b_grpo_dev1000_n5.json
-```
+  --out outputs/eval/qwen3_4b_grpo.json
 
-EvalPlus sanity:
-
-```bash
-python scripts/eval_evalplus.py --model Qwen/Qwen3.5-2B \
-  --lora outputs/qwen3_5_2b_grpo \
+# EvalPlus sanity (function-completion, different prompt — basics check only)
+python scripts/eval_evalplus.py --model Qwen/Qwen3-4B \
+  --lora outputs/qwen3_4b_grpo \
   --dataset humaneval --out outputs/eval/he_grpo.jsonl
 evalplus.evaluate --dataset humaneval --samples outputs/eval/he_grpo.jsonl
 ```
 
-## Optional: SFT ablation
-
-Only do this as a separate experiment. Keep it clearly named and do not mix it
-with the Base adapter you already trained.
-
-```bash
-python rlcoder/train/sft_trl.py --model Qwen/Qwen3.5-2B \
-  --data data/sft_train.jsonl --limit 1000 \
-  --per-device-batch 2 --grad-accum 8 --max-length 4096 \
-  --lr 5e-5 --epochs 1 \
-  --bf16 --gradient-checkpointing \
-  --output outputs/qwen3_5_2b_sft_ablation
-```
+For the external headline number, run LiveCodeBench separately against the
+merged model (`scripts/merge_lora.py`).
 
 ## Notes
 
 - If vLLM shows Triton/JIT compilation messages on first run, that is usually
   warm-up. Check GPU utilization before killing it.
-- If GRPO OOMs, reduce `--max-completion`, `--per-device-batch`, or `--lora-r`.
-- Stop GPU billing between sessions. Keep the disk and upload important
-  adapters/checkpoints to the Hub.
+- If SFT/GRPO OOMs: lower `--max-length`/`--max-completion`, `--per-device-batch`,
+  or `--num-generations`; keep LoRA (drop `--full-ft`).
+- Stop GPU billing between sessions. Upload important adapters to the Hub.

@@ -1,13 +1,24 @@
-# AutoDL image: prefer a PyTorch/CUDA image with torch already installed.
-# Do not reinstall torch unless the image is broken.
+# AutoDL/RunPod image: prefer a PyTorch/CUDA image with torch already installed.
+# Do not reinstall torch unless the image is broken. Lock EXACT versions with
+# `pip freeze > requirements-gpu.lock.txt` after your first clean run — the
+# SFT/GRPO configs filter unknown TRL fields, but major bumps still move defaults.
 
-# Qwen3.5 support is recent; keep the HF stack current on the GPU box.
+# HF stack. Qwen3 (thinking) is well-supported here.
 transformers>=5.0
 trl>=1.7
 peft>=0.17
-datasets>=2.18
 accelerate>=1.0
+
+# datasets<4.0 on purpose: LiveCodeBench's loader still uses a trust_remote_code
+# script, which datasets 4.x dropped. OpenCodeReasoning (parquet) loads on any
+# version, so this ceiling only exists for the LCB eval.
+datasets>=2.20,<4.0
+
+# Eval
 evalplus>=0.3.1
+# LiveCodeBench: scripts/eval_livecodebench.py loads it via `datasets`. For the
+# leaderboard-comparable judge over functional (LeetCode) problems too, use the
+# official package instead:  pip install livecodebench
 
 # Optional fast rollout/eval. Install only if it matches the image's torch/CUDA:
 #   pip install "vllm>=0.10"
