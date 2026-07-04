@@ -417,18 +417,21 @@ def main() -> None:
     if args.local_model_path:
         args.local_model_path = str(Path(args.local_model_path).expanduser().resolve())
 
-    _register_model(args)
-    _patch_vllm(args)
-    _patch_datasets_for_lcb()
-
     main_path = lcb_root / "lcb_runner" / "runner" / "main.py"
     argv = _build_official_argv(args)
-    print("[lcb-official] running: " + shlex.join(argv))
 
     old_cwd = Path.cwd()
     old_argv = sys.argv
     try:
         os.chdir(lcb_root)
+        # Official LCB imports prompt modules that open files with paths relative
+        # to the LiveCodeBench repo root, so all LCB imports must happen after
+        # this chdir. Patch datasets before importing benchmark modules, because
+        # they bind `from datasets import load_dataset` at import time.
+        _patch_datasets_for_lcb()
+        _register_model(args)
+        _patch_vllm(args)
+        print("[lcb-official] running: " + shlex.join(argv))
         sys.argv = argv
         runpy.run_path(str(main_path), run_name="__main__")
     finally:
