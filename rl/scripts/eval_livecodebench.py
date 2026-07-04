@@ -7,6 +7,12 @@ Why this wrapper exists:
   with the LiveCodeBench source root as the working directory.
 - Qwen3 report-style eval needs knobs official LCB does not expose directly,
   notably vLLM `top_k`, `max_model_len`, and GPU memory utilization.
+- Two official LCB defaults are wrong for thinking models and are overridden
+  here: `--stop` defaults to "###", which truncates Qwen3-style answers at
+  "### Approach" before the final code block (grading them 0), so it is
+  dropped for chat/thinking model styles unless --stop is passed explicitly;
+  and the vLLM runner hardcodes `enforce_eager=True` (CUDA graphs off, several
+  times slower decode), which is disabled unless --enforce-eager is passed.
 
 Example:
 
@@ -63,6 +69,9 @@ def _parse_args() -> argparse.Namespace:
                     type=int, default=None)
     ap.add_argument("--enable-prefix-caching", "--enable_prefix_caching",
                     action="store_true")
+    ap.add_argument("--enforce-eager", "--enforce_eager", action="store_true",
+                    help="Keep official LCB's enforce_eager=True (disables "
+                         "CUDA graphs; several times slower decode).")
     ap.add_argument("--trust-remote-code", "--trust_remote_code",
                     action="store_true")
 
@@ -227,11 +236,9 @@ def _register_model(args: argparse.Namespace) -> None:
 
 def _patch_vllm(args: argparse.Namespace) -> None:
     _patch_nvrtc_library_path()
-    if args.top_k <= 0 and args.max_model_len is None and args.gpu_mem_util is None:
-        return
 
     try:
-        import vllm
+        import vllm  # noqa: F401
     except Exception as exc:  # noqa: BLE001
         raise SystemExit(
             "vLLM is required for official LiveCodeBench open-model generation.\n"
@@ -241,12 +248,27 @@ def _patch_vllm(args: argparse.Namespace) -> None:
             f"Original import error: {exc}"
         ) from exc
 
+    from lcb_runner.lm_styles import LanguageModelStore, LMStyle
     from lcb_runner.runner import vllm_runner
 
     original_sampling_params = vllm_runner.SamplingParams
     original_llm = vllm_runner.LLM
 
+    # Official LCB defaults --stop to "###". Chat/thinking models (Qwen3, QwQ,
+    # R1) emit "### Approach" headers before the final code block, so that stop
+    # truncates the answer and the extractor grades it 0. GenericBase few-shot
+    # prompts genuinely rely on "###" as the example separator, so keep it there.
+    style = LanguageModelStore[args.model].model_style
+    drop_default_stop = args.stop is None and style != LMStyle.GenericBase
+
     def sampling_params(*pos, **kwargs):
+        if drop_default_stop:
+            stop = kwargs.get("stop")
+            if isinstance(stop, str):
+                stop = [stop]
+            if stop:
+                stop = [s for s in stop if s != "###"]
+                kwargs["stop"] = stop or None
         if args.top_k > 0:
             kwargs.setdefault("top_k", args.top_k)
         return original_sampling_params(*pos, **kwargs)
@@ -256,6 +278,8 @@ def _patch_vllm(args: argparse.Namespace) -> None:
             kwargs["max_model_len"] = args.max_model_len
         if args.gpu_mem_util is not None and not kwargs.get("gpu_memory_utilization"):
             kwargs["gpu_memory_utilization"] = args.gpu_mem_util
+        if not args.enforce_eager:
+            kwargs["enforce_eager"] = False
         return original_llm(*pos, **kwargs)
 
     # Patch only official LCB's imported references. Do not replace
@@ -265,13 +289,17 @@ def _patch_vllm(args: argparse.Namespace) -> None:
     vllm_runner.LLM = llm
 
     patched = []
+    if drop_default_stop:
+        patched.append("dropped default stop '###'")
+    if not args.enforce_eager:
+        patched.append("enforce_eager=False (CUDA graphs on)")
     if args.top_k > 0:
         patched.append(f"top_k={args.top_k}")
     if args.max_model_len is not None:
         patched.append(f"max_model_len={args.max_model_len}")
     if args.gpu_mem_util is not None:
         patched.append(f"gpu_memory_utilization={args.gpu_mem_util}")
-    print("[lcb-official] patched vLLM " + ", ".join(patched))
+    print("[lcb-official] patched vLLM: " + ", ".join(patched))
 
 
 def _patch_nvrtc_library_path() -> None:

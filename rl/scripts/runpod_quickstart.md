@@ -175,6 +175,14 @@ python scripts/eval_livecodebench.py \
   --timeout 10 --num-process-evaluate 8
 ```
 
+The wrapper also overrides two official-LCB defaults that break thinking
+models: it drops the default `--stop "###"` (which truncates Qwen3-style
+answers at "### Approach" before the final code block, grading them 0) and
+runs vLLM with CUDA graphs enabled instead of the hardcoded
+`enforce_eager=True`. Pass `--stop` / `--enforce-eager` to restore the
+official behavior. When re-running after a truncated run, do not use
+`--continue-existing` — it would keep the old truncated generations.
+
 For an SFT/GRPO LoRA, merge first because official LiveCodeBench does not load
 PEFT adapters directly:
 
