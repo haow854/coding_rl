@@ -30,8 +30,9 @@ def main() -> None:
                     help="Samples/problem. >1 gives a low-variance pass@1 estimate; "
                          "single greedy pass@1 is too noisy for small deltas.")
     ap.add_argument("--temperature", type=float, default=0.8)
-    ap.add_argument("--max-tokens", type=int, default=8192,
-                    help="Thinking eval truncates below this and tanks the score.")
+    ap.add_argument("--max-tokens", type=int, default=4096,
+                    help="Matches GRPO --max-completion; raise for very "
+                         "long-reasoning problems (slower, less batching).")
     ap.add_argument("--ks", default="1,5")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()

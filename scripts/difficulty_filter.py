@@ -110,9 +110,9 @@ def main() -> None:
     ap.add_argument("--keep-lo", type=int, default=1)
     ap.add_argument("--keep-hi", type=int, default=7)
     ap.add_argument("--max-problems", type=int, default=None)
-    ap.add_argument("--max-tokens", type=int, default=8192,
-                    help="Probe in thinking mode with room to finish; match the "
-                         "GRPO --max-completion.")
+    ap.add_argument("--max-tokens", type=int, default=4096,
+                    help="Probe at the SAME budget as GRPO --max-completion so the "
+                         "kept difficulty band matches training.")
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--max-model-len", type=int, default=8192)
     ap.add_argument("--gpu-mem-util", type=float, default=0.90)

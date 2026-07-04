@@ -45,7 +45,7 @@ class EvalConfig:
     n_samples: int = 8
     temperature: float = 0.8
     top_p: float = 0.95
-    max_tokens: int = 8192            # thinking traces need room or eval truncates
+    max_tokens: int = 4096            # matches GRPO max-completion; consistent gen budget
     ks: Tuple[int, ...] = (1, 5)
 
 

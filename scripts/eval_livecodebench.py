@@ -136,7 +136,8 @@ def main() -> None:
     ap.add_argument("--max-tests", type=int, default=20)
     ap.add_argument("--n", type=int, default=8)
     ap.add_argument("--temperature", type=float, default=0.8)
-    ap.add_argument("--max-tokens", type=int, default=8192)
+    ap.add_argument("--max-tokens", type=int, default=4096,
+                    help="Matches GRPO --max-completion; raise for long reasoning.")
     ap.add_argument("--ks", default="1,5")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
