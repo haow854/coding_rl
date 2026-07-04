@@ -13,3 +13,6 @@ wandb/
 *.ckpt
 *.safetensors
 *.jsonl
+
+# external benchmark checkout; install via requirements.txt instead
+/LiveCodeBench/

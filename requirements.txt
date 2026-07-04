@@ -1,21 +1,28 @@
-# ── core (CPU; works locally for sandbox / reward / data development) ──────
-datasets>=2.18
-pydantic>=2.6
+# Single RunPod/GPU environment file for data, SFT/GRPO, vLLM eval, and official
+# LiveCodeBench. Prefer a PyTorch/CUDA RunPod image with torch already installed;
+# install this without `-U` so pip does not casually replace the image's CUDA
+# matched torch build.
+
+# Core data / utilities
+torch
 numpy
-huggingface_hub
+pydantic>=2.6
 pyyaml
+huggingface_hub
+datasets>=2.20
+matplotlib
 
-# ── eval harnesses ────────────────────────────────────────────────────────
+# HF training stack
+transformers>=5.0
+trl>=1.7
+peft>=0.17
+accelerate>=1.0
+
+# vLLM generation / eval
+vllm>=0.10
+flashinfer-python
+nvidia-cuda-nvrtc
+
+# Evaluation harnesses
 evalplus>=0.3.1
-# LiveCodeBench / BigCodeBench: install on the GPU box from their repos
-#   pip install git+https://github.com/LiveCodeBench/LiveCodeBench.git
-#   pip install bigcodebench --upgrade
-
-# ── training / inference (install on the AutoDL GPU box ONLY) ──────────────
-# torch          # match the box CUDA, e.g. --index-url https://download.pytorch.org/whl/cu121
-# transformers>=4.51      # Qwen3 support
-# vllm>=0.8               # fast rollouts (Qwen3)
-# trl>=0.12               # GRPOTrainer
-# peft>=0.13              # LoRA
-# accelerate
-# flash-attn              # optional
+git+https://github.com/LiveCodeBench/LiveCodeBench.git

@@ -20,27 +20,12 @@ keep `--per-device-batch` small.
 
 ## 1. Environment
 
-Use a RunPod PyTorch image with CUDA/PyTorch already installed, then install the project
-deps. Do not reinstall torch unless the image is broken.
+Use a RunPod PyTorch image with CUDA/PyTorch already installed, then install the
+project deps. Do not use `-U` here unless the image is broken; the bundled torch
+wheel should stay matched to the image CUDA stack.
 
 ```bash
-pip install -U -r requirements-gpu.txt
-```
-
-Install vLLM only if it matches the image's torch/CUDA stack:
-
-```bash
-pip install "vllm>=0.10"
-```
-
-Install the official LiveCodeBench harness when you want a leaderboard-style
-external score:
-
-```bash
-cd /workspace
-git clone https://github.com/LiveCodeBench/LiveCodeBench.git
-python -m pip install -e LiveCodeBench
-cd /workspace/coding_rl
+python -m pip install -r requirements.txt
 ```
 
 If vLLM tries to downgrade torch or compile forever in a broken image, fix the
@@ -180,7 +165,7 @@ at runtime and delegates judging to `lcb_runner`:
 ```bash
 export VLLM_USE_FLASHINFER_SAMPLER=1
 
-python scripts/eval_livecodebench.py --lcb-root /workspace/LiveCodeBench \
+python scripts/eval_livecodebench.py \
   --model Qwen/Qwen3-4B \
   --release-version release_v5 \
   --start-date 2024-10-01 --end-date 2025-02-28 \
@@ -197,7 +182,7 @@ PEFT adapters directly:
 python scripts/merge_lora.py --base Qwen/Qwen3-4B \
   --adapter outputs/qwen3_4b_grpo --out outputs/qwen3_4b_grpo_merged
 
-python scripts/eval_livecodebench.py --lcb-root /workspace/LiveCodeBench \
+python scripts/eval_livecodebench.py \
   --model qwen3_4b_grpo_merged \
   --local-model-path outputs/qwen3_4b_grpo_merged \
   --release-version release_v5 \

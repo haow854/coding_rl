@@ -10,11 +10,11 @@ problems, run the official LiveCodeBench harness on the generated outputs.
 Use the date window to control contamination (keep problems released after the
 base model's training cutoff).
 
-    python scripts/eval_livecodebench.py --model Qwen/Qwen3-4B \
+    python scripts/eval_livecodebench_subset.py --model Qwen/Qwen3-4B \
         --version-tag release_v5 --start-date 2025-01-01 \
         --out outputs/eval/lcb_base.json
 
-    python scripts/eval_livecodebench.py --model Qwen/Qwen3-4B \
+    python scripts/eval_livecodebench_subset.py --model Qwen/Qwen3-4B \
         --lora outputs/qwen3_4b_sft --version-tag release_v5 --start-date 2025-01-01 \
         --out outputs/eval/lcb_sft.json
 """

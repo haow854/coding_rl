@@ -6,10 +6,8 @@ This script delegates generation and judging to the official LiveCodeBench
 
 RunPod setup:
 
-    cd /workspace
-    git clone https://github.com/LiveCodeBench/LiveCodeBench.git
-    python -m pip install -e LiveCodeBench
     cd /workspace/coding_rl
+    python -m pip install -r requirements.txt
 
 Qwen3 report-ish run:
 
@@ -23,6 +21,7 @@ Qwen3 report-ish run:
 from __future__ import annotations
 
 import argparse
+import os
 import runpy
 import shlex
 import sys
@@ -35,10 +34,8 @@ INSTALL_HELP = """Official LiveCodeBench is not importable.
 
 Install it on the RunPod box, for example:
 
-    cd /workspace
-    git clone https://github.com/LiveCodeBench/LiveCodeBench.git
-    python -m pip install -e LiveCodeBench
     cd /workspace/coding_rl
+    python -m pip install -r requirements.txt
 
 If you already cloned it, pass --lcb-root /workspace/LiveCodeBench.
 """
@@ -61,8 +58,10 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument("--end-date", "--end_date", default=None)
     ap.add_argument("--not-fast", "--not_fast", action="store_true")
 
-    ap.add_argument("--n", type=int, default=1)
-    ap.add_argument("--temperature", type=float, default=0.6)
+    ap.add_argument("--n", type=int, default=10,
+                    help="Official LiveCodeBench default is 10.")
+    ap.add_argument("--temperature", type=float, default=0.2,
+                    help="Official LiveCodeBench default is 0.2; Qwen3 thinking recommends 0.6.")
     ap.add_argument("--top-p", "--top_p", type=float, default=0.95)
     ap.add_argument("--top-k", "--top_k", type=int, default=-1,
                     help="Injected into vLLM SamplingParams; official LCB has no CLI flag for this.")
@@ -112,14 +111,15 @@ def _parse_args() -> argparse.Namespace:
     return ap.parse_args()
 
 
-def _ensure_lcb_importable(lcb_root: Optional[str]) -> None:
+def _ensure_lcb_importable(lcb_root: Optional[str]) -> Path:
     if lcb_root:
         root = Path(lcb_root).expanduser().resolve()
         sys.path.insert(0, str(root))
     try:
-        import lcb_runner  # noqa: F401
+        import lcb_runner
     except ModuleNotFoundError as exc:
         raise SystemExit(INSTALL_HELP) from exc
+    return Path(lcb_runner.__file__).resolve().parent.parent
 
 
 def _auto_style(model: str) -> str:
@@ -160,8 +160,13 @@ def _patch_vllm(args: argparse.Namespace) -> None:
     try:
         import vllm
     except Exception as exc:  # noqa: BLE001
-        print(f"[lcb-official] warning: could not patch vLLM before import: {exc}")
-        return
+        raise SystemExit(
+            "vLLM is required for official LiveCodeBench open-model generation.\n"
+            "Install the project environment first:\n\n"
+            "    cd /workspace/coding_rl\n"
+            "    python -m pip install -r requirements.txt\n\n"
+            f"Original import error: {exc}"
+        ) from exc
 
     original_sampling_params = vllm.SamplingParams
 
@@ -260,17 +265,22 @@ def _warn_ignored(args: argparse.Namespace) -> None:
 def main() -> None:
     args = _parse_args()
     _warn_ignored(args)
-    _ensure_lcb_importable(args.lcb_root)
+    lcb_root = _ensure_lcb_importable(args.lcb_root)
+    if args.local_model_path:
+        args.local_model_path = str(Path(args.local_model_path).expanduser().resolve())
     _register_model_if_needed(args)
     _patch_vllm(args)
 
     argv = _build_official_argv(args)
     print("[lcb-official] running: " + shlex.join(argv))
     old_argv = sys.argv
+    old_cwd = Path.cwd()
     try:
+        os.chdir(lcb_root)
         sys.argv = argv
         runpy.run_module("lcb_runner.runner.main", run_name="__main__")
     finally:
+        os.chdir(old_cwd)
         sys.argv = old_argv
 
 
