@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.machinery
+import json
 import os
 import runpy
 import shlex
@@ -269,6 +270,68 @@ def _patch_vllm(args: argparse.Namespace) -> None:
     print("[lcb-official] patched vLLM " + ", ".join(patched))
 
 
+def _raw_lcb_jsonl_names(version_tag: str) -> List[str]:
+    try:
+        n = int(version_tag.rsplit("v", 1)[-1])
+    except Exception:  # noqa: BLE001
+        n = 1
+    return ["test.jsonl"] + [f"test{i}.jsonl" for i in range(2, n + 1)]
+
+
+def _load_lcb_raw_jsonl(repo_id: str, version_tag: str) -> List[dict]:
+    from huggingface_hub import hf_hub_download
+
+    rows: List[dict] = []
+    got: List[str] = []
+    for name in _raw_lcb_jsonl_names(version_tag):
+        try:
+            path = hf_hub_download(repo_id, name, repo_type="dataset")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[lcb-official] skipped {repo_id}/{name}: {exc}")
+            continue
+        got.append(name)
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    rows.append(json.loads(line))
+    if not rows:
+        raise RuntimeError(
+            f"Could not load raw LiveCodeBench JSONL files for {repo_id} "
+            f"{version_tag}. Tried: {_raw_lcb_jsonl_names(version_tag)}"
+        )
+    print(f"[lcb-official] loaded {len(rows)} rows from {repo_id} raw JSONL {got}")
+    return rows
+
+
+def _patch_datasets_for_lcb() -> None:
+    """Make official LCB work with datasets>=4, which removed script loading."""
+    try:
+        import datasets
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(
+            "datasets is required for LiveCodeBench. Install dependencies first:\n\n"
+            "    python -m pip install -r requirements.txt\n\n"
+            f"Original import error: {exc}"
+        ) from exc
+
+    original_load_dataset = datasets.load_dataset
+
+    def load_dataset_compat(path, *args, **kwargs):
+        if path == "livecodebench/code_generation_lite":
+            version_tag = kwargs.get("version_tag")
+            if version_tag is None and args:
+                version_tag = args[0]
+            version_tag = version_tag or "release_latest"
+            if version_tag == "release_latest":
+                version_tag = "release_v6"
+            return _load_lcb_raw_jsonl(path, str(version_tag))
+        return original_load_dataset(path, *args, **kwargs)
+
+    datasets.load_dataset = load_dataset_compat
+    print("[lcb-official] patched datasets.load_dataset for LCB raw JSONL")
+
+
 def _build_official_argv(args: argparse.Namespace) -> List[str]:
     argv = [
         "lcb_runner.runner.main",
@@ -337,6 +400,7 @@ def main() -> None:
 
     _register_model(args)
     _patch_vllm(args)
+    _patch_datasets_for_lcb()
 
     main_path = lcb_root / "lcb_runner" / "runner" / "main.py"
     argv = _build_official_argv(args)
