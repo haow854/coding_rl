@@ -13,6 +13,7 @@ def generate(
     n: int = 1,
     temperature: float = 0.2,
     top_p: float = 0.95,
+    top_k: int = -1,
     max_tokens: int = 4096,
     lora_path: Optional[str] = None,
     max_model_len: int = 8192,
@@ -50,7 +51,10 @@ def generate(
         max_lora_rank=max_lora_rank,
         seed=seed,
     )
-    sp = SamplingParams(n=n, temperature=temperature, top_p=top_p, max_tokens=max_tokens)
+    sp_kwargs = dict(n=n, temperature=temperature, top_p=top_p, max_tokens=max_tokens)
+    if top_k > 0:
+        sp_kwargs["top_k"] = top_k
+    sp = SamplingParams(**sp_kwargs)
 
     lora_req = None
     if lora_path:

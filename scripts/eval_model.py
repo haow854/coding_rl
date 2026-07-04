@@ -30,9 +30,15 @@ def main() -> None:
                     help="Samples/problem. >1 gives a low-variance pass@1 estimate; "
                          "single greedy pass@1 is too noisy for small deltas.")
     ap.add_argument("--temperature", type=float, default=0.8)
+    ap.add_argument("--top-p", type=float, default=0.95)
+    ap.add_argument("--top-k", type=int, default=-1,
+                    help="Set to 20 for Qwen3 report-like thinking eval.")
     ap.add_argument("--max-tokens", type=int, default=4096,
                     help="Matches GRPO --max-completion; raise for very "
                          "long-reasoning problems (slower, less batching).")
+    ap.add_argument("--max-model-len", type=int, default=8192,
+                    help="vLLM context length. Use 32768+ for report-like long thinking.")
+    ap.add_argument("--gpu-mem-util", type=float, default=0.90)
     ap.add_argument("--ks", default="1,5")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
@@ -40,7 +46,11 @@ def main() -> None:
     problems = load_clean_jsonl(args.data, limit=args.limit)
     ks = [int(x) for x in args.ks.split(",")]
     res, _ = evaluate(args.model, problems, n=args.n, temperature=args.temperature,
-                      max_tokens=args.max_tokens, lora_path=args.lora, ks=ks)
+                      top_p=args.top_p, top_k=args.top_k,
+                      max_tokens=args.max_tokens,
+                      max_model_len=args.max_model_len,
+                      gpu_mem_util=args.gpu_mem_util,
+                      lora_path=args.lora, ks=ks)
     print(json.dumps(res, indent=2))
     if args.out:
         os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

@@ -72,6 +72,8 @@ scripts/
   split_stages.py        make dev / RL splits
   difficulty_filter.py   keep problems with non-zero pass-count variance
   eval_model.py          in-house sandbox pass@k eval
+  eval_livecodebench.py  official LiveCodeBench harness wrapper
+  eval_livecodebench_subset.py  local stdin/stdout-only LCB subset judge
   eval_evalplus.py       HumanEval+/MBPP+ output generation
 ```
 

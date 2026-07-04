@@ -9,15 +9,15 @@ trl>=1.7
 peft>=0.17
 accelerate>=1.0
 
-# datasets 4.x is fine: scripts/eval_livecodebench.py reads LCB's raw jsonl
-# directly when the trust_remote_code script loader is unavailable.
+# datasets 4.x is fine for the project-local LCB subset judge
+# (`scripts/eval_livecodebench_subset.py`) and data-building scripts.
 datasets>=2.20
 
 # Eval
 evalplus>=0.3.1
-# LiveCodeBench: scripts/eval_livecodebench.py loads it via `datasets`. For the
-# leaderboard-comparable judge over functional (LeetCode) problems too, use the
-# official package instead:  pip install livecodebench
+# Official LiveCodeBench is intentionally installed from its repo on the GPU box:
+#   git clone https://github.com/LiveCodeBench/LiveCodeBench.git /workspace/LiveCodeBench
+#   python -m pip install -e /workspace/LiveCodeBench
 
 # Optional fast rollout/eval. Install only if it matches the image's torch/CUDA:
 #   pip install "vllm>=0.10"

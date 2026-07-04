@@ -19,7 +19,10 @@ def evaluate(
     n: int = 1,
     temperature: float = 0.2,
     top_p: float = 0.95,
+    top_k: int = -1,
     max_tokens: int = 4096,
+    max_model_len: int = 8192,
+    gpu_mem_util: float = 0.90,
     lora_path: Optional[str] = None,
     reward_timeout: float = 10.0,
     ks: Sequence[int] = (1,),
@@ -28,7 +31,9 @@ def evaluate(
         model,
         [build_messages(p) for p in problems],
         n=n, temperature=temperature, top_p=top_p,
-        max_tokens=max_tokens, lora_path=lora_path,
+        top_k=top_k, max_tokens=max_tokens,
+        max_model_len=max_model_len, gpu_mem_util=gpu_mem_util,
+        lora_path=lora_path,
     )
 
     comps, tests, owner = [], [], []

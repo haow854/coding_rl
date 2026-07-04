@@ -1,195 +1,277 @@
-"""LiveCodeBench (code generation) eval through our own sandbox judge.
+"""Official LiveCodeBench code-generation evaluation wrapper.
 
-Loads livecodebench/code_generation_lite, keeps the STDIN/STDOUT problems
-(AtCoder/Codeforces — the same distribution we train on) and scores them with
-the SAME sandbox judge used for training/eval everywhere else, so base/SFT/GRPO
-numbers are directly comparable. Functional (LeetCode) problems need a call-based
-judge and are counted + skipped; for a leaderboard-comparable number over ALL
-problems, run the official LiveCodeBench harness on the generated outputs.
+This script delegates generation and judging to the official LiveCodeBench
+`lcb_runner` package. The project-local stdin/stdout-only evaluator is kept as
+`scripts/eval_livecodebench_subset.py`.
 
-Use the date window to control contamination (keep problems released after the
-base model's training cutoff).
+RunPod setup:
 
+    cd /workspace
+    git clone https://github.com/LiveCodeBench/LiveCodeBench.git
+    python -m pip install -e LiveCodeBench
+    cd /workspace/coding_rl
+
+Qwen3 report-ish run:
+
+    export VLLM_USE_FLASHINFER_SAMPLER=1
     python scripts/eval_livecodebench.py --model Qwen/Qwen3-4B \
-        --version-tag release_v5 --start-date 2025-01-01 \
-        --out outputs/eval/lcb_base.json
-
-    python scripts/eval_livecodebench.py --model Qwen/Qwen3-4B \
-        --lora outputs/qwen3_4b_sft --version-tag release_v5 --start-date 2025-01-01 \
-        --out outputs/eval/lcb_sft.json
+        --release-version release_v5 --start-date 2024-10-01 \
+        --end-date 2025-02-28 --model-style QwQ \
+        --n 1 --temperature 0.6 --top-p 0.95 --top-k 20 \
+        --max-tokens 32768 --max-model-len 40960 --gpu-mem-util 0.95
 """
+from __future__ import annotations
+
 import argparse
-import base64
-import json
-import os
-import pickle
+import runpy
+import shlex
 import sys
-import zlib
-from collections import defaultdict
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from rlcoder.data.schema import Problem              # noqa: E402
-from rlcoder.eval.metrics import aggregate_pass_at_k  # noqa: E402
-from rlcoder.eval.run_eval import evaluate            # noqa: E402
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
 
 
-def _load_lcb(version_tag: str, split: str):
-    """Load LCB, surviving both the old script loader and datasets>=4.0.
+INSTALL_HELP = """Official LiveCodeBench is not importable.
 
-    datasets 4.x dropped trust_remote_code script loading, which LCB still uses,
-    so fall back to reading the versioned raw jsonl straight from the repo
-    (release_vN = test.jsonl + test2..testN.jsonl).
-    """
-    from datasets import load_dataset
+Install it on the RunPod box, for example:
 
-    for call in (
-        lambda: load_dataset("livecodebench/code_generation_lite",
-                             version_tag=version_tag, split=split, trust_remote_code=True),
-        lambda: load_dataset("livecodebench/code_generation_lite",
-                             version_tag, split=split, trust_remote_code=True),
-    ):
-        try:
-            return call()
-        except Exception:  # noqa: BLE001
-            pass
+    cd /workspace
+    git clone https://github.com/LiveCodeBench/LiveCodeBench.git
+    python -m pip install -e LiveCodeBench
+    cd /workspace/coding_rl
+
+If you already cloned it, pass --lcb-root /workspace/LiveCodeBench.
+"""
+
+
+def _parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model", required=True,
+                    help="HF model id or the model name registered with LCB.")
+    ap.add_argument("--local-model-path", "--local_model_path", default=None,
+                    help="Local merged model path for official LCB/vLLM.")
+    ap.add_argument("--lora", default=None,
+                    help="Not supported by official LCB. Merge first with scripts/merge_lora.py.")
+    ap.add_argument("--lcb-root", default=None,
+                    help="Path to a cloned LiveCodeBench repo, if not pip-installed.")
+
+    ap.add_argument("--release-version", "--release_version", "--version-tag",
+                    dest="release_version", default="release_v5")
+    ap.add_argument("--start-date", "--start_date", default=None)
+    ap.add_argument("--end-date", "--end_date", default=None)
+    ap.add_argument("--not-fast", "--not_fast", action="store_true")
+
+    ap.add_argument("--n", type=int, default=1)
+    ap.add_argument("--temperature", type=float, default=0.6)
+    ap.add_argument("--top-p", "--top_p", type=float, default=0.95)
+    ap.add_argument("--top-k", "--top_k", type=int, default=-1,
+                    help="Injected into vLLM SamplingParams; official LCB has no CLI flag for this.")
+    ap.add_argument("--max-tokens", "--max_tokens", type=int, default=32768)
+    ap.add_argument("--max-model-len", type=int, default=None,
+                    help="Injected into vLLM LLM(...). Use 40960 for 32K output plus prompt.")
+    ap.add_argument("--gpu-mem-util", type=float, default=None,
+                    help="Injected as vLLM gpu_memory_utilization.")
+    ap.add_argument("--dtype", default="bfloat16")
+    ap.add_argument("--tensor-parallel-size", "--tensor_parallel_size", type=int, default=None)
+    ap.add_argument("--enable-prefix-caching", "--enable_prefix_caching", action="store_true")
+    ap.add_argument("--trust-remote-code", "--trust_remote_code", action="store_true")
+
+    ap.add_argument("--timeout", type=int, default=10)
+    ap.add_argument("--num-process-evaluate", "--num_process_evaluate", type=int, default=12)
+    ap.add_argument("--no-evaluate", action="store_true",
+                    help="Only generate official LCB outputs; do not run the judge.")
+    ap.add_argument("--use-cache", "--use_cache", action="store_true")
+    ap.add_argument("--continue-existing", "--continue_existing", action="store_true")
+    ap.add_argument("--continue-existing-with-eval", "--continue_existing_with_eval",
+                    action="store_true")
+    ap.add_argument("--stop", default=None,
+                    help="Comma-separated stop strings passed to official LCB.")
+
+    ap.add_argument("--model-style", default="auto",
+                    choices=["auto", "CodeQwenInstruct", "QwQ", "DeepSeekR1",
+                             "GenericBase", "LLaMa3"],
+                    help="Style to register if official LCB does not know --model.")
+    ap.add_argument("--model-repr", default=None,
+                    help="Display name for a model dynamically registered with LCB.")
+    ap.add_argument("--release-date", default="2024-06-30",
+                    help="Release date used when dynamically registering --model.")
+    ap.add_argument("--link", default=None)
+
+    # Accepted for backward compatibility with the old subset script.
+    ap.add_argument("--out", default=None,
+                    help="Ignored: official LCB writes into its own output directory.")
+    ap.add_argument("--limit", type=int, default=None,
+                    help="Ignored: official LCB has no exact equivalent.")
+    ap.add_argument("--max-tests", type=int, default=None,
+                    help="Ignored: official LCB controls lite/full tests via --not-fast.")
+    ap.add_argument("--ks", default=None,
+                    help="Ignored: official LCB reports its own pass@k metrics.")
+
+    ap.add_argument("--official-arg", action="append", default=[],
+                    help="Extra raw argument(s) appended to lcb_runner.runner.main.")
+    return ap.parse_args()
+
+
+def _ensure_lcb_importable(lcb_root: Optional[str]) -> None:
+    if lcb_root:
+        root = Path(lcb_root).expanduser().resolve()
+        sys.path.insert(0, str(root))
+    try:
+        import lcb_runner  # noqa: F401
+    except ModuleNotFoundError as exc:
+        raise SystemExit(INSTALL_HELP) from exc
+
+
+def _auto_style(model: str) -> str:
+    lower = model.lower()
+    if "qwen3" in lower or "qwq" in lower:
+        return "QwQ"
+    if "deepseek-r1" in lower:
+        return "DeepSeekR1"
+    if "qwen" in lower:
+        return "CodeQwenInstruct"
+    if "llama-3" in lower or "llama3" in lower:
+        return "LLaMa3"
+    return "GenericBase"
+
+
+def _register_model_if_needed(args: argparse.Namespace) -> None:
+    from lcb_runner.lm_styles import LMStyle, LanguageModel, LanguageModelList, LanguageModelStore
+
+    if args.model in LanguageModelStore and args.model_style == "auto":
+        return
+
+    style_name = _auto_style(args.model) if args.model_style == "auto" else args.model_style
+    style = getattr(LMStyle, style_name)
+    release_date = datetime.fromisoformat(args.release_date)
+    model_repr = args.model_repr or args.model.split("/")[-1]
+    link = args.link or (f"https://huggingface.co/{args.model}" if "/" in args.model else None)
+    model = LanguageModel(args.model, model_repr, style, release_date, link=link)
+    action = "overrode" if args.model in LanguageModelStore else "registered"
+    LanguageModelList.append(model)
+    LanguageModelStore[args.model] = model
+    print(f"[lcb-official] {action} {args.model!r} as LMStyle.{style_name}")
+
+
+def _patch_vllm(args: argparse.Namespace) -> None:
+    if args.top_k <= 0 and args.max_model_len is None and args.gpu_mem_util is None:
+        return
 
     try:
-        n = int(version_tag.rsplit("v", 1)[-1])
-    except Exception:  # noqa: BLE001
-        raise SystemExit(f"can't parse --version-tag {version_tag!r} (expected e.g. release_v5)")
-    from huggingface_hub import hf_hub_download
+        import vllm
+    except Exception as exc:  # noqa: BLE001
+        print(f"[lcb-official] warning: could not patch vLLM before import: {exc}")
+        return
 
-    names = ["test.jsonl"] + [f"test{i}.jsonl" for i in range(2, n + 1)]
-    rows, got = [], []
-    for name in names:
-        try:
-            path = hf_hub_download("livecodebench/code_generation_lite", name,
-                                   repo_type="dataset")
-        except Exception:  # noqa: BLE001
-            continue
-        got.append(name)
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    rows.append(json.loads(line))
-    if not rows:
-        raise SystemExit(
-            "could not load LiveCodeBench (script path failed and no raw jsonl found).\n"
-            "Try `pip install \"datasets<4.0\"` or `pip install livecodebench`.")
-    print(f"[lcb] loaded {len(rows)} rows from raw jsonl {got} (datasets>=4.0 path)")
-    return rows
+    original_sampling_params = vllm.SamplingParams
 
+    def sampling_params(*pos, **kwargs):
+        if args.top_k > 0:
+            kwargs.setdefault("top_k", args.top_k)
+        return original_sampling_params(*pos, **kwargs)
 
-def _decode_tests(raw):
-    """LCB test cases: public = plain JSON string; private = base64+zlib+pickle."""
-    if not raw:
-        return []
-    if isinstance(raw, list):
-        return raw
+    vllm.SamplingParams = sampling_params
     try:
-        return json.loads(raw)
+        import vllm.sampling_params as sampling_params_mod
+
+        sampling_params_mod.SamplingParams = sampling_params
     except Exception:  # noqa: BLE001
         pass
-    try:
-        return json.loads(pickle.loads(zlib.decompress(base64.b64decode(raw.encode("utf-8")))))
-    except Exception:  # noqa: BLE001
-        return []
+
+    original_llm = vllm.LLM
+
+    def llm(*pos, **kwargs):
+        if args.max_model_len is not None and not kwargs.get("max_model_len"):
+            kwargs["max_model_len"] = args.max_model_len
+        if args.gpu_mem_util is not None and not kwargs.get("gpu_memory_utilization"):
+            kwargs["gpu_memory_utilization"] = args.gpu_mem_util
+        return original_llm(*pos, **kwargs)
+
+    vllm.LLM = llm
+    patched = []
+    if args.top_k > 0:
+        patched.append(f"top_k={args.top_k}")
+    if args.max_model_len is not None:
+        patched.append(f"max_model_len={args.max_model_len}")
+    if args.gpu_mem_util is not None:
+        patched.append(f"gpu_memory_utilization={args.gpu_mem_util}")
+    print("[lcb-official] patched vLLM " + ", ".join(patched))
 
 
-def _lcb_to_problem(row: dict, max_tests: int):
-    """Build a stdin/stdout Problem, or None for functional (call-based) rows."""
-    tests_raw = list(_decode_tests(row.get("public_test_cases"))) + \
-        list(_decode_tests(row.get("private_test_cases")))
-    if not tests_raw:
-        return None
-    # Only stdin problems: our sandbox judges by stdin->stdout, not by calling a fn.
-    if any((t.get("testtype") or "stdin") != "stdin" for t in tests_raw):
-        return None
-    tests = [{"input": t.get("input", "") or "", "output": t.get("output", "") or ""}
-             for t in tests_raw]
-    if max_tests:
-        tests = tests[:max_tests]
-    diff = row.get("difficulty")
-    return Problem(
-        problem_id=str(row.get("question_id") or ""),
-        source=str(row.get("platform") or "livecodebench"),
-        statement=row.get("question_content") or "",
-        tests=tests,
-        mode="stdin_stdout",
-        difficulty=str(diff) if diff is not None else None,
-    )
+def _build_official_argv(args: argparse.Namespace) -> List[str]:
+    argv = [
+        "lcb_runner.runner.main",
+        "--model", args.model,
+        "--scenario", "codegeneration",
+        "--release_version", args.release_version,
+        "--n", str(args.n),
+        "--temperature", str(args.temperature),
+        "--top_p", str(args.top_p),
+        "--max_tokens", str(args.max_tokens),
+        "--dtype", args.dtype,
+        "--timeout", str(args.timeout),
+        "--num_process_evaluate", str(args.num_process_evaluate),
+    ]
+    if not args.no_evaluate:
+        argv.append("--evaluate")
+    if args.local_model_path:
+        argv += ["--local_model_path", args.local_model_path]
+    if args.start_date:
+        argv += ["--start_date", args.start_date]
+    if args.end_date:
+        argv += ["--end_date", args.end_date]
+    if args.tensor_parallel_size is not None:
+        argv += ["--tensor_parallel_size", str(args.tensor_parallel_size)]
+    if args.stop is not None:
+        argv += ["--stop", args.stop]
+    for flag_name, enabled in [
+        ("--not_fast", args.not_fast),
+        ("--trust_remote_code", args.trust_remote_code),
+        ("--enable_prefix_caching", args.enable_prefix_caching),
+        ("--use_cache", args.use_cache),
+        ("--continue_existing", args.continue_existing),
+        ("--continue_existing_with_eval", args.continue_existing_with_eval),
+    ]:
+        if enabled:
+            argv.append(flag_name)
+    for raw in args.official_arg:
+        argv.extend(shlex.split(raw))
+    return argv
+
+
+def _warn_ignored(args: argparse.Namespace) -> None:
+    if args.lora:
+        raise SystemExit(
+            "Official LiveCodeBench does not load PEFT LoRA adapters directly.\n"
+            "Merge first, then pass --local-model-path, e.g.\n\n"
+            "    python scripts/merge_lora.py --base Qwen/Qwen3-4B "
+            "--adapter outputs/qwen3_4b_sft --out outputs/qwen3_4b_sft_merged\n"
+            "    python scripts/eval_livecodebench.py --model qwen3_4b_sft_merged "
+            "--local-model-path outputs/qwen3_4b_sft_merged ..."
+        )
+    ignored = []
+    for name in ["out", "limit", "max_tests", "ks"]:
+        if getattr(args, name) not in (None, ""):
+            ignored.append("--" + name.replace("_", "-"))
+    if ignored:
+        print("[lcb-official] ignored old subset-only args: " + ", ".join(ignored))
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--model", required=True)
-    ap.add_argument("--lora", default=None)
-    ap.add_argument("--version-tag", default="release_v5",
-                    help="release_v1..v6; pick a window newer than the base's cutoff.")
-    ap.add_argument("--split", default="test")
-    ap.add_argument("--start-date", default=None,
-                    help="Keep contest_date >= YYYY-MM-DD (contamination control).")
-    ap.add_argument("--end-date", default=None, help="Keep contest_date <= YYYY-MM-DD.")
-    ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--max-tests", type=int, default=20)
-    ap.add_argument("--n", type=int, default=8)
-    ap.add_argument("--temperature", type=float, default=0.8)
-    ap.add_argument("--max-tokens", type=int, default=4096,
-                    help="Matches GRPO --max-completion; raise for long reasoning.")
-    ap.add_argument("--ks", default="1,5")
-    ap.add_argument("--out", default=None)
-    args = ap.parse_args()
+    args = _parse_args()
+    _warn_ignored(args)
+    _ensure_lcb_importable(args.lcb_root)
+    _register_model_if_needed(args)
+    _patch_vllm(args)
 
-    ds = _load_lcb(args.version_tag, args.split)
-
-    problems, skipped_functional = [], 0
-    for row in ds:
-        cd = str(row.get("contest_date") or "")[:10]
-        if args.start_date and cd and cd < args.start_date:
-            continue
-        if args.end_date and cd and cd > args.end_date:
-            continue
-        p = _lcb_to_problem(row, args.max_tests)
-        if p is None:
-            skipped_functional += 1
-            continue
-        problems.append(p)
-        if args.limit and len(problems) >= args.limit:
-            break
-
-    print(f"LCB {args.version_tag}: {len(problems)} stdin problems judged "
-          f"(skipped {skipped_functional} functional/other; those need the "
-          f"official harness)")
-    if not problems:
-        raise SystemExit("no stdin problems after filtering; widen the date window "
-                         "or --version-tag")
-
-    ks = [int(x) for x in args.ks.split(",")]
-    res, per = evaluate(args.model, problems, n=args.n, temperature=args.temperature,
-                        max_tokens=args.max_tokens, lora_path=args.lora, ks=ks)
-
-    # pass@1 broken down by LCB difficulty label.
-    diff_total, diff_correct = defaultdict(list), defaultdict(list)
-    for prob, tot, cor in per:
-        d = prob.difficulty or "unknown"
-        diff_total[d].append(tot)
-        diff_correct[d].append(cor)
-    res["pass@1_by_difficulty"] = {
-        d: round(aggregate_pass_at_k(diff_total[d], diff_correct[d], [1])["pass@1"], 4)
-        for d in sorted(diff_total)
-    }
-    res["skipped_functional"] = skipped_functional
-    res["version_tag"] = args.version_tag
-    res["judged"] = "stdin_subset"
-
-    print(json.dumps(res, indent=2))
-    if args.out:
-        os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-        with open(args.out, "w", encoding="utf-8") as f:
-            json.dump({"model": args.model, "lora": args.lora, **res}, f, indent=2)
-        print("wrote", args.out)
+    argv = _build_official_argv(args)
+    print("[lcb-official] running: " + shlex.join(argv))
+    old_argv = sys.argv
+    try:
+        sys.argv = argv
+        runpy.run_module("lcb_runner.runner.main", run_name="__main__")
+    finally:
+        sys.argv = old_argv
 
 
 if __name__ == "__main__":

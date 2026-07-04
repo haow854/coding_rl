@@ -33,6 +33,16 @@ Install vLLM only if it matches the image's torch/CUDA stack:
 pip install "vllm>=0.10"
 ```
 
+Install the official LiveCodeBench harness when you want a leaderboard-style
+external score:
+
+```bash
+cd /workspace
+git clone https://github.com/LiveCodeBench/LiveCodeBench.git
+python -m pip install -e LiveCodeBench
+cd /workspace/coding_rl
+```
+
 If vLLM tries to downgrade torch or compile forever in a broken image, fix the
 environment before launching long jobs.
 
@@ -164,7 +174,42 @@ evalplus.evaluate --dataset humaneval --samples outputs/eval/he_grpo.jsonl
 ```
 
 For the external headline number, run LiveCodeBench separately against the
-merged model (`scripts/merge_lora.py`).
+official harness. The wrapper below registers `Qwen/Qwen3-4B` with official LCB
+at runtime and delegates judging to `lcb_runner`:
+
+```bash
+export VLLM_USE_FLASHINFER_SAMPLER=1
+
+python scripts/eval_livecodebench.py --lcb-root /workspace/LiveCodeBench \
+  --model Qwen/Qwen3-4B \
+  --release-version release_v5 \
+  --start-date 2024-10-01 --end-date 2025-02-28 \
+  --model-style QwQ \
+  --n 1 --temperature 0.6 --top-p 0.95 --top-k 20 \
+  --max-tokens 32768 --max-model-len 40960 --gpu-mem-util 0.95 \
+  --timeout 10 --num-process-evaluate 8
+```
+
+For an SFT/GRPO LoRA, merge first because official LiveCodeBench does not load
+PEFT adapters directly:
+
+```bash
+python scripts/merge_lora.py --base Qwen/Qwen3-4B \
+  --adapter outputs/qwen3_4b_grpo --out outputs/qwen3_4b_grpo_merged
+
+python scripts/eval_livecodebench.py --lcb-root /workspace/LiveCodeBench \
+  --model qwen3_4b_grpo_merged \
+  --local-model-path outputs/qwen3_4b_grpo_merged \
+  --release-version release_v5 \
+  --start-date 2024-10-01 --end-date 2025-02-28 \
+  --model-style QwQ \
+  --n 1 --temperature 0.6 --top-p 0.95 --top-k 20 \
+  --max-tokens 32768 --max-model-len 40960 --gpu-mem-util 0.95 \
+  --timeout 10 --num-process-evaluate 8
+```
+
+The previous stdin/stdout-only local judge is still available as
+`scripts/eval_livecodebench_subset.py` for quick internal comparisons.
 
 ## Notes
 
