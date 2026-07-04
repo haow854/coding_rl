@@ -64,6 +64,11 @@ def _parse_args() -> argparse.Namespace:
                     help="Injected into vLLM LLM(...).")
     ap.add_argument("--gpu-mem-util", type=float, default=None,
                     help="Injected as vLLM gpu_memory_utilization.")
+    ap.add_argument("--max-num-seqs", "--max_num_seqs", type=int, default=None,
+                    help="Injected as vLLM max_num_seqs. Cap concurrency so "
+                         "long thinking rollouts fit in KV cache without "
+                         "preemption thrash (see 'Maximum concurrency' in the "
+                         "vLLM startup log for a guide).")
     ap.add_argument("--dtype", default="bfloat16")
     ap.add_argument("--tensor-parallel-size", "--tensor_parallel_size",
                     type=int, default=None)
@@ -278,6 +283,8 @@ def _patch_vllm(args: argparse.Namespace) -> None:
             kwargs["max_model_len"] = args.max_model_len
         if args.gpu_mem_util is not None and not kwargs.get("gpu_memory_utilization"):
             kwargs["gpu_memory_utilization"] = args.gpu_mem_util
+        if args.max_num_seqs is not None and not kwargs.get("max_num_seqs"):
+            kwargs["max_num_seqs"] = args.max_num_seqs
         if not args.enforce_eager:
             kwargs["enforce_eager"] = False
         return original_llm(*pos, **kwargs)
@@ -299,6 +306,8 @@ def _patch_vllm(args: argparse.Namespace) -> None:
         patched.append(f"max_model_len={args.max_model_len}")
     if args.gpu_mem_util is not None:
         patched.append(f"gpu_memory_utilization={args.gpu_mem_util}")
+    if args.max_num_seqs is not None:
+        patched.append(f"max_num_seqs={args.max_num_seqs}")
     print("[lcb-official] patched vLLM: " + ", ".join(patched))
 
 

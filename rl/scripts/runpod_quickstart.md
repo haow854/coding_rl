@@ -183,6 +183,12 @@ runs vLLM with CUDA graphs enabled instead of the hardcoded
 official behavior. When re-running after a truncated run, do not use
 `--continue-existing` — it would keep the old truncated generations.
 
+Long thinking rollouts are KV-cache bound: with 32k-token outputs only a few
+dozen sequences fit in KV at once, and admitting every request at startup
+causes vLLM preemption/recompute thrash. Pass `--max-num-seqs` (roughly 1.5-2x
+the "Maximum concurrency ... per request" figure in the vLLM startup log,
+e.g. 32 on an 80GB A100 for Qwen3-1.7B at 40960 max len) to cap concurrency.
+
 For an SFT/GRPO LoRA, merge first because official LiveCodeBench does not load
 PEFT adapters directly:
 
