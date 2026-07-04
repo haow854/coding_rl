@@ -21,11 +21,13 @@ Qwen3 report-ish run:
 from __future__ import annotations
 
 import argparse
+import importlib.machinery
 import importlib.util
 import os
 import runpy
 import shlex
 import sys
+import types
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -155,14 +157,41 @@ def _looks_like_lcb_source(root: Path) -> bool:
     )
 
 
+def _install_lcb_source_package(root: Path) -> None:
+    """Force imports to use the source checkout, even if a bad pip package exists.
+
+    Upstream currently ships `lcb_runner` as a namespace-style source directory
+    but its pip metadata can install a regular, incomplete `lcb_runner` package.
+    A regular package later on sys.path can shadow the source tree, so install a
+    synthetic package object whose __path__ points at the checkout.
+    """
+    _purge_lcb_modules()
+    root_s = str(root)
+    if root_s in sys.path:
+        sys.path.remove(root_s)
+    sys.path.insert(0, root_s)
+
+    pkg_dir = root / "lcb_runner"
+    pkg = types.ModuleType("lcb_runner")
+    pkg.__package__ = "lcb_runner"
+    pkg.__path__ = [str(pkg_dir)]
+    pkg.__file__ = None
+    spec = importlib.machinery.ModuleSpec("lcb_runner", loader=None, is_package=True)
+    spec.submodule_search_locations = [str(pkg_dir)]
+    pkg.__spec__ = spec
+    sys.modules["lcb_runner"] = pkg
+
+
 def _ensure_lcb_importable(lcb_root: Optional[str]) -> Path:
     for root in _candidate_lcb_roots(lcb_root):
         if not _looks_like_lcb_source(root):
             continue
-        _purge_lcb_modules()
-        sys.path.insert(0, str(root))
-        spec = importlib.util.find_spec("lcb_runner.runner.main")
-        if spec is not None:
+        _install_lcb_source_package(root)
+        try:
+            spec = importlib.util.find_spec("lcb_runner.runner.main")
+        except ModuleNotFoundError:
+            spec = None
+        if spec is not None and spec.origin:
             print(f"[lcb-official] using LiveCodeBench source: {root}")
             return root
 
