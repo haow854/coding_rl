@@ -21,6 +21,7 @@ Qwen3 report-ish run:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import runpy
 import shlex
@@ -119,7 +120,22 @@ def _ensure_lcb_importable(lcb_root: Optional[str]) -> Path:
         import lcb_runner
     except ModuleNotFoundError as exc:
         raise SystemExit(INSTALL_HELP) from exc
-    return Path(lcb_runner.__file__).resolve().parent.parent
+
+    if getattr(lcb_runner, "__file__", None):
+        return Path(lcb_runner.__file__).resolve().parent.parent
+
+    pkg_paths = list(getattr(lcb_runner, "__path__", []) or [])
+    if pkg_paths:
+        return Path(pkg_paths[0]).resolve().parent
+
+    spec = importlib.util.find_spec("lcb_runner")
+    if spec and spec.submodule_search_locations:
+        return Path(list(spec.submodule_search_locations)[0]).resolve().parent
+    if spec and spec.origin:
+        return Path(spec.origin).resolve().parent.parent
+
+    raise SystemExit("Could not locate the LiveCodeBench package root. "
+                     "Pass --lcb-root /workspace/LiveCodeBench.")
 
 
 def _auto_style(model: str) -> str:
