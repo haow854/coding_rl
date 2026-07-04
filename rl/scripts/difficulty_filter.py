@@ -113,6 +113,9 @@ def main() -> None:
     ap.add_argument("--max-tokens", type=int, default=4096,
                     help="Probe at the SAME budget as GRPO --max-completion so the "
                          "kept difficulty band matches training.")
+    ap.add_argument("--no-thinking", action="store_true",
+                    help="Probe in non-thinking mode; must match GRPO "
+                         "--no-thinking or the kept band is meaningless.")
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--max-model-len", type=int, default=8192)
     ap.add_argument("--gpu-mem-util", type=float, default=0.90)
@@ -145,7 +148,8 @@ def main() -> None:
 
         proc = load_processing_class(args.model)
         prompts = [
-            render_chat_prompt(proc, build_messages(p))
+            render_chat_prompt(proc, build_messages(p),
+                               enable_thinking=not args.no_thinking)
             for p in problems
         ]
 

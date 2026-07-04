@@ -189,6 +189,21 @@ causes vLLM preemption/recompute thrash. Pass `--max-num-seqs` (roughly 1.5-2x
 the "Maximum concurrency ... per request" figure in the vLLM startup log,
 e.g. 32 on an 80GB A100 for Qwen3-1.7B at 40960 max len) to cap concurrency.
 
+For the non-thinking baseline/headline (matches `--no-thinking` training), pass
+`--no-think` plus a distinct `--model-repr` (same n/temperature would otherwise
+overwrite the thinking run's output files), and use Qwen3's non-thinking
+sampling (0.7 / 0.8 / 20):
+
+```bash
+python rl/scripts/eval_livecodebench.py \
+  --model Qwen/Qwen3-1.7B --no-think --model-repr Qwen3-1.7B-nothink \
+  --release-version release_v5 \
+  --start-date 2024-10-01 --end-date 2025-02-28 \
+  --n 4 --temperature 0.7 --top-p 0.8 --top-k 20 \
+  --max-tokens 8192 --max-model-len 16384 --gpu-mem-util 0.95 \
+  --timeout 10 --num-process-evaluate 8
+```
+
 For an SFT/GRPO LoRA, merge first because official LiveCodeBench does not load
 PEFT adapters directly:
 

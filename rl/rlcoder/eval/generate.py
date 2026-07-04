@@ -20,6 +20,7 @@ def generate(
     gpu_mem_util: float = 0.90,
     max_lora_rank: int = 32,
     seed: int = 0,
+    enable_thinking: bool = True,
 ) -> List[List[str]]:
     # FlashInfer's sampler crashes on Blackwell/sm120 (e.g. RTX 5090) but is MUCH
     # faster than the native Triton top-k/top-p kernel on A100/H100 (the native
@@ -38,7 +39,7 @@ def generate(
 
     proc = load_processing_class(model)
     prompts = [
-        render_chat_prompt(proc, m)
+        render_chat_prompt(proc, m, enable_thinking=enable_thinking)
         for m in prompts_messages
     ]
 

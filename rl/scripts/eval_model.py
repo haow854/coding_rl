@@ -39,6 +39,9 @@ def main() -> None:
     ap.add_argument("--max-model-len", type=int, default=8192,
                     help="vLLM context length. Use 32768+ for report-like long thinking.")
     ap.add_argument("--gpu-mem-util", type=float, default=0.90)
+    ap.add_argument("--no-thinking", action="store_true",
+                    help="Render prompts in non-thinking mode; use the same "
+                         "setting as training for base-vs-RL comparisons.")
     ap.add_argument("--ks", default="1,5")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
@@ -50,12 +53,14 @@ def main() -> None:
                       max_tokens=args.max_tokens,
                       max_model_len=args.max_model_len,
                       gpu_mem_util=args.gpu_mem_util,
-                      lora_path=args.lora, ks=ks)
+                      lora_path=args.lora, ks=ks,
+                      enable_thinking=not args.no_thinking)
     print(json.dumps(res, indent=2))
     if args.out:
         os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
         with open(args.out, "w", encoding="utf-8") as f:
-            json.dump({"model": args.model, "lora": args.lora, "data": args.data, **res}, f, indent=2)
+            json.dump({"model": args.model, "lora": args.lora, "data": args.data,
+                       "no_thinking": args.no_thinking, **res}, f, indent=2)
         print("wrote", args.out)
 
 

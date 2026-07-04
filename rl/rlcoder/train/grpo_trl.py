@@ -38,31 +38,36 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
-def _prompt_token_len(processing_class, messages) -> int:
-    from rlcoder.prompting import render_chat_prompt
-
-    rendered = render_chat_prompt(processing_class, messages)
-    ids = processing_class(rendered, add_special_tokens=False)["input_ids"]
-    return len(ids)
-
-
 def build_hf_dataset(data_path: str, limit, processing_class=None,
-                     max_prompt_tokens=None):
+                     max_prompt_tokens=None, enable_thinking: bool = True):
+    """Prompt dataset with PRE-RENDERED prompt strings.
+
+    Rendering ourselves (instead of handing TRL message lists) pins
+    enable_thinking explicitly: TRL applies the chat template with the model's
+    defaults, and Qwen3 defaults to thinking mode — which would silently
+    reintroduce long <think> rollouts in a run meant to be non-thinking.
+    """
     from datasets import Dataset
 
     from rlcoder.data.load import load_clean_jsonl
-    from rlcoder.prompting import build_messages
+    from rlcoder.prompting import build_messages, render_chat_prompt
 
     problems = load_clean_jsonl(data_path, limit=limit)
     rows = []
     dropped_long = 0
     for p in problems:
         messages = build_messages(p)
-        if processing_class is not None and max_prompt_tokens is not None:
-            if _prompt_token_len(processing_class, messages) > max_prompt_tokens:
+        if processing_class is None:
+            rows.append({"prompt": messages, "tests": p.tests, "mode": p.mode})
+            continue
+        rendered = render_chat_prompt(processing_class, messages,
+                                      enable_thinking=enable_thinking)
+        if max_prompt_tokens is not None:
+            ids = processing_class(rendered, add_special_tokens=False)["input_ids"]
+            if len(ids) > max_prompt_tokens:
                 dropped_long += 1
                 continue
-        rows.append({"prompt": messages, "tests": p.tests, "mode": p.mode})
+        rows.append({"prompt": rendered, "tests": p.tests, "mode": p.mode})
     if dropped_long:
         print(f"dropped {dropped_long} problems with prompt > {max_prompt_tokens} tokens")
     return Dataset.from_list(rows)
@@ -172,6 +177,11 @@ def main() -> None:
     ap.add_argument("--lora-r", type=int, default=32)
     ap.add_argument("--full-ft", action="store_true",
                     help="Full-parameter GRPO instead of LoRA (needs more VRAM).")
+    ap.add_argument("--no-thinking", action="store_true",
+                    help="Render prompts in non-thinking mode (Qwen3: empty "
+                         "<think> block). Must match the difficulty_filter "
+                         "probe and eval settings, or the trained/measured "
+                         "policies diverge.")
     ap.add_argument("--reward-timeout", type=float, default=10.0)
     ap.add_argument("--use-vllm", action="store_true")
     ap.add_argument("--bf16", action="store_true")
@@ -205,8 +215,10 @@ def main() -> None:
         args.limit,
         processing_class=processing_class,
         max_prompt_tokens=args.max_prompt,
+        enable_thinking=not args.no_thinking,
     )
-    print(f"training on {len(train_ds)} verified problems from {args.data}")
+    print(f"training on {len(train_ds)} verified problems from {args.data} "
+          f"({'non-thinking' if args.no_thinking else 'thinking'} prompts)")
 
     reward_fn = make_reward_fn(
         timeout=args.reward_timeout,

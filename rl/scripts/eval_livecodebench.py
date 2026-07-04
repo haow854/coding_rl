@@ -92,6 +92,12 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument("--stop", default=None,
                     help="Comma-separated stop strings passed to official LCB.")
 
+    ap.add_argument("--no-think", "--no-thinking", "--no_think",
+                    dest="no_think", action="store_true",
+                    help="Append an empty <think></think> block to ChatML "
+                         "prompts (Qwen3 non-thinking mode). Pair with "
+                         "--model-repr to keep output dirs separate from "
+                         "thinking runs.")
     ap.add_argument("--model-style", default="auto",
                     choices=["auto", "CodeQwenInstruct", "QwQ",
                              "DeepSeekR1", "GenericBase", "LLaMa3"])
@@ -311,6 +317,29 @@ def _patch_vllm(args: argparse.Namespace) -> None:
     print("[lcb-official] patched vLLM: " + ", ".join(patched))
 
 
+def _patch_no_think(args: argparse.Namespace) -> None:
+    """Qwen3 non-thinking mode: the official chat template renders an empty
+    <think> block inside the assistant turn when enable_thinking=False. LCB's
+    handwritten ChatML prompts never do this, so inject it here."""
+    if not args.no_think:
+        return
+
+    from lcb_runner.prompts import code_generation
+    from lcb_runner.runner import scenario_router
+
+    original = code_generation.format_prompt_generation
+
+    def format_prompt_no_think(question, style):
+        prompt = original(question, style)
+        if isinstance(prompt, str) and prompt.endswith("<|im_start|>assistant\n"):
+            prompt += "<think>\n\n</think>\n\n"
+        return prompt
+
+    code_generation.format_prompt_generation = format_prompt_no_think
+    scenario_router.format_prompt_generation = format_prompt_no_think
+    print("[lcb-official] no-think: appending empty <think> block to ChatML prompts")
+
+
 def _patch_nvrtc_library_path() -> None:
     try:
         import nvidia.cuda_nvrtc as cuda_nvrtc
@@ -467,6 +496,7 @@ def main() -> None:
         # they bind `from datasets import load_dataset` at import time.
         _patch_datasets_for_lcb()
         _register_model(args)
+        _patch_no_think(args)
         _patch_vllm(args)
         print("[lcb-official] running: " + shlex.join(argv))
         sys.argv = argv

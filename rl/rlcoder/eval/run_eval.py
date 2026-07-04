@@ -26,6 +26,7 @@ def evaluate(
     lora_path: Optional[str] = None,
     reward_timeout: float = 10.0,
     ks: Sequence[int] = (1,),
+    enable_thinking: bool = True,
 ) -> Tuple[dict, List[Tuple[Problem, int, int]]]:
     gens = generate(
         model,
@@ -33,7 +34,7 @@ def evaluate(
         n=n, temperature=temperature, top_p=top_p,
         top_k=top_k, max_tokens=max_tokens,
         max_model_len=max_model_len, gpu_mem_util=gpu_mem_util,
-        lora_path=lora_path,
+        lora_path=lora_path, enable_thinking=enable_thinking,
     )
 
     comps, tests, owner = [], [], []
