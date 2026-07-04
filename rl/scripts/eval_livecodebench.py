@@ -226,6 +226,7 @@ def _register_model(args: argparse.Namespace) -> None:
 
 
 def _patch_vllm(args: argparse.Namespace) -> None:
+    _patch_nvrtc_library_path()
     if args.top_k <= 0 and args.max_model_len is None and args.gpu_mem_util is None:
         return
 
@@ -240,10 +241,10 @@ def _patch_vllm(args: argparse.Namespace) -> None:
             f"Original import error: {exc}"
         ) from exc
 
-    original_sampling_params = vllm.SamplingParams
-    # Force lazy import of LLM before replacing vllm.SamplingParams. Some vLLM
-    # modules use `SamplingParams | None` in annotations during import.
-    original_llm = vllm.LLM
+    from lcb_runner.runner import vllm_runner
+
+    original_sampling_params = vllm_runner.SamplingParams
+    original_llm = vllm_runner.LLM
 
     def sampling_params(*pos, **kwargs):
         if args.top_k > 0:
@@ -257,8 +258,11 @@ def _patch_vllm(args: argparse.Namespace) -> None:
             kwargs["gpu_memory_utilization"] = args.gpu_mem_util
         return original_llm(*pos, **kwargs)
 
-    vllm.SamplingParams = sampling_params
-    vllm.LLM = llm
+    # Patch only official LCB's imported references. Do not replace
+    # vllm.SamplingParams globally: vLLM engine warmup uses classmethods such as
+    # SamplingParams.for_sampler_warmup() in worker processes.
+    vllm_runner.SamplingParams = sampling_params
+    vllm_runner.LLM = llm
 
     patched = []
     if args.top_k > 0:
@@ -268,6 +272,21 @@ def _patch_vllm(args: argparse.Namespace) -> None:
     if args.gpu_mem_util is not None:
         patched.append(f"gpu_memory_utilization={args.gpu_mem_util}")
     print("[lcb-official] patched vLLM " + ", ".join(patched))
+
+
+def _patch_nvrtc_library_path() -> None:
+    try:
+        import nvidia.cuda_nvrtc as cuda_nvrtc
+    except Exception as exc:  # noqa: BLE001
+        print(f"[lcb-official] warning: nvidia-cuda-nvrtc not importable: {exc}")
+        return
+
+    lib_dir = str(Path(cuda_nvrtc.__file__).resolve().parent / "lib")
+    old = os.environ.get("LD_LIBRARY_PATH", "")
+    parts = [p for p in old.split(":") if p]
+    if lib_dir not in parts:
+        os.environ["LD_LIBRARY_PATH"] = lib_dir + (":" + old if old else "")
+        print(f"[lcb-official] added nvrtc lib path: {lib_dir}")
 
 
 def _raw_lcb_jsonl_names(version_tag: str) -> List[str]:
