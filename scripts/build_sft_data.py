@@ -35,19 +35,28 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from rlcoder.data.parse_ocr import ocr_row_to_problem, problem_group_key  # noqa: E402
 
 
-def _load_stream(dataset: str, config: str | None, split: str):
+def _load_stream(dataset: str, config, split: str):
     from datasets import load_dataset  # heavy dep; GPU box only
 
-    try:
-        if config:
-            return load_dataset(dataset, config, split=split, streaming=True)
-        return load_dataset(dataset, split=split, streaming=True)
-    except Exception as e:  # noqa: BLE001
-        raise SystemExit(
-            f"could not load {dataset} (config={config}, split={split}): {e}\n"
-            "Check the dataset card for the exact config/split names, then pass "
-            "--config / --split."
-        )
+    # OpenCodeReasoning exposes split_0/split_1 as *configs*, not splits, so be
+    # forgiving about which slot the name lands in.
+    if config:
+        candidates = [(config, s) for s in dict.fromkeys([split, "train", config])]
+    else:
+        candidates = [(None, split), (split, "train"), (split, split)]
+
+    errors = []
+    for cfg, sp in candidates:
+        try:
+            if cfg:
+                return load_dataset(dataset, cfg, split=sp, streaming=True)
+            return load_dataset(dataset, split=sp, streaming=True)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"config={cfg}, split={sp}: {str(e).splitlines()[0]}")
+    raise SystemExit(
+        f"could not load {dataset}:\n  " + "\n  ".join(errors) +
+        "\nCheck the dataset card and pass --config / --split explicitly."
+    )
 
 
 def _percentiles(values, ps=(50, 75, 90, 95, 99)):
@@ -64,10 +73,11 @@ def _percentiles(values, ps=(50, 75, 90, 95, 99)):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="nvidia/OpenCodeReasoning")
-    ap.add_argument("--config", default=None,
-                    help="Dataset config name, if the card requires one.")
-    ap.add_argument("--split", default="split_0",
-                    help="split_0 is self-contained (carries the problem text).")
+    ap.add_argument("--config", default="split_0",
+                    help="OCR exposes split_0/split_1 as CONFIGS; split_0 is "
+                         "self-contained (carries the problem text).")
+    ap.add_argument("--split", default="train",
+                    help="Split name inside the config.")
     ap.add_argument("--out", default="data/sft_ocr.jsonl")
     ap.add_argument("--solutions-per-problem", type=int, default=1,
                     help="Keep the k shortest traces per unique problem.")
