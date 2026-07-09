@@ -14,6 +14,15 @@ def _dtype_kwargs(bf16: bool) -> dict:
 
 def load_base_model(model_name: str, bf16: bool = False):
     kwargs = _dtype_kwargs(bf16)
+    try:
+        import flash_attn  # noqa: F401
+
+        # TRL packing/padding-free needs a flash-attention variant to keep
+        # packed samples from attending to each other; SDPA silently
+        # cross-contaminates them (and is far slower on packed batches).
+        kwargs["attn_implementation"] = "flash_attention_2"
+    except ImportError:
+        pass
 
     try:
         from transformers import AutoModelForCausalLM
