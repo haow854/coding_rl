@@ -12,17 +12,32 @@ def _dtype_kwargs(bf16: bool) -> dict:
     return {"torch_dtype": torch.bfloat16}
 
 
-def load_base_model(model_name: str, bf16: bool = False):
-    kwargs = _dtype_kwargs(bf16)
+def _flash_attn_implementation() -> Optional[str]:
+    """TRL packing/padding-free needs a flash-attention variant to keep packed
+    samples from attending to each other; SDPA silently cross-contaminates
+    them (and is far slower on packed batches). Prefer locally compiled
+    flash-attn; fall back to the hub-prebuilt kernel (`pip install kernels`),
+    which needs no matching wheel or nvcc build."""
     try:
         import flash_attn  # noqa: F401
 
-        # TRL packing/padding-free needs a flash-attention variant to keep
-        # packed samples from attending to each other; SDPA silently
-        # cross-contaminates them (and is far slower on packed batches).
-        kwargs["attn_implementation"] = "flash_attention_2"
+        return "flash_attention_2"
     except ImportError:
         pass
+    try:
+        import kernels  # noqa: F401
+
+        return "kernels-community/flash-attn2"
+    except ImportError:
+        return None
+
+
+def load_base_model(model_name: str, bf16: bool = False):
+    kwargs = _dtype_kwargs(bf16)
+    impl = _flash_attn_implementation()
+    if impl:
+        kwargs["attn_implementation"] = impl
+        print(f"attention implementation: {impl}")
 
     try:
         from transformers import AutoModelForCausalLM
