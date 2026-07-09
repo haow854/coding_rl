@@ -155,7 +155,9 @@ def main() -> None:
     ap.add_argument("--init-adapter", default=None,
                     help="Optional LoRA adapter to continue from; leave unset "
                          "for the main post-trained direct-GRPO route.")
-    ap.add_argument("--data", default="data/train_problems.jsonl")
+    ap.add_argument("--data", default="data/grpo_train.jsonl",
+                    help="Open-r1 pool after difficulty_filter.py; use "
+                         "data/rl_pool.jsonl to skip the filter.")
     ap.add_argument("--output", default="outputs/grpo")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--num-generations", type=int, default=4)

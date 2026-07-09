@@ -1,21 +1,24 @@
-"""Stage-1 distillation SFT: teach the base model to reason then code.
+"""Stage-1 SFT: teach the base model the answer format before any GRPO.
 
-This is now the MAIN first stage, not an ablation. We SFT on competitive-code
-reasoning traces (scripts/build_sft_data.py -> OpenCodeReasoning) so the policy
-learns the <think>...</think> + fenced-program format before any GRPO. Loss is
-masked to the completion only; prompts are pre-rendered in thinking mode so the
-target keeps its reasoning block (some chat templates strip <think> from
-message-form assistant turns).
+Default data is the open-r1 pool (scripts/build_dataset.py --source hf ->
+scripts/split_stages.py --sft N -> data/sft_train.jsonl), where gold_solution
+is a bare fenced program: plain problem->code SFT, pair with --no-thinking for
+Qwen3's non-thinking format. For reasoning distillation instead, build
+<think>-trace data (scripts/build_sft_data.py -> OpenCodeReasoning, or
+build_dataset.py --source cots) and raise --max-length to 16384. Loss is
+masked to the completion only; prompts are pre-rendered (thinking mode unless
+--no-thinking) so a trace target keeps its reasoning block (some chat
+templates strip <think> from message-form assistant turns).
 
-Example on the GPU box (LoRA):
+Example on the GPU box (LoRA, open-r1 non-thinking):
     python rlcoder/train/sft_trl.py --model Qwen/Qwen3-4B \
-        --data data/sft_ocr.jsonl --max-length 16384 \
+        --data data/sft_train.jsonl --no-thinking \
         --bf16 --gradient-checkpointing --packing \
-        --output outputs/qwen3_4b_sft
+        --output outputs/qwen3_4b_sft_nothink
 
 Full-parameter (needs more VRAM; lower the LR):
-    python rlcoder/train/sft_trl.py --model Qwen/Qwen3-4B --data data/sft_ocr.jsonl \
-        --full-ft --lr 1e-5 --max-length 16384 --bf16 --gradient-checkpointing \
+    python rlcoder/train/sft_trl.py --model Qwen/Qwen3-4B --full-ft --lr 1e-5 \
+        --bf16 --gradient-checkpointing --packing \
         --output outputs/qwen3_4b_sft_full
 """
 from __future__ import annotations
@@ -56,14 +59,16 @@ def build_hf_dataset(data_path: str, limit, processing_class, enable_thinking: b
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="Qwen/Qwen3-4B")
-    ap.add_argument("--data", default="data/sft_ocr.jsonl")
+    ap.add_argument("--data", default="data/sft_train.jsonl")
     ap.add_argument("--output", default="outputs/sft")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--per-device-batch", type=int, default=1)
     ap.add_argument("--grad-accum", type=int, default=16)
-    ap.add_argument("--max-length", type=int, default=16384,
-                    help="R1 traces are long; too small truncates the target "
-                         "mid-reasoning and teaches the model never to stop.")
+    ap.add_argument("--max-length", type=int, default=8192,
+                    help="Fits open-r1 bare-code targets (statement + program). "
+                         "Raise to 16384 for <think>-trace data: R1 traces are "
+                         "long, and truncating the target mid-reasoning teaches "
+                         "the model never to stop.")
     ap.add_argument("--lr", type=float, default=1e-4,
                     help="LoRA default; pass ~1e-5 with --full-ft.")
     ap.add_argument("--optim", default="adamw_torch",
@@ -95,7 +100,7 @@ def main() -> None:
     processing_class = load_processing_class(args.model)
     train_ds = build_hf_dataset(args.data, args.limit, processing_class,
                                 enable_thinking=not args.no_thinking)
-    print(f"SFT on {len(train_ds)} reasoning traces from {args.data}")
+    print(f"SFT on {len(train_ds)} examples from {args.data}")
 
     if args.full_ft:
         peft_config = None
