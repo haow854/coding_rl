@@ -42,6 +42,7 @@ def _has_template(obj) -> bool:
 
 def _ensure_template(obj):
     if not _has_template(obj):
+        print("No chat template found, using default")
         obj.chat_template = QWEN_CHATML_TEMPLATE
     return obj
 
@@ -52,6 +53,7 @@ def load_processing_class(model_name: str):
     try:
         tok = AutoTokenizer.from_pretrained(model_name)
         if hasattr(tok, "apply_chat_template"):
+            print("Using tokenizer with apply_chat_template")
             return _ensure_template(tok)
     except Exception:  # noqa: BLE001
         pass
@@ -83,6 +85,7 @@ def render_chat_prompt(
     try:
         return processing_class.apply_chat_template(messages, **kwargs)
     except TypeError:
+        print("Error applying chat template, using default")
         # Older tokenizers/processors may not accept Qwen's enable_thinking kwarg.
         kwargs.pop("enable_thinking", None)
         return processing_class.apply_chat_template(messages, **kwargs)
