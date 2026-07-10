@@ -4,12 +4,13 @@ numbers are directly comparable. Generates n samples/problem -> pass@1 / pass@k.
 """
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from rlcoder.data.schema import Problem
 from rlcoder.eval.generate import generate
 from rlcoder.eval.metrics import aggregate_pass_at_k
 from rlcoder.prompting import build_messages
+from rlcoder.rewards import RewardBreakdown
 from rlcoder.rollout.single_turn import score_batch
 
 
@@ -27,6 +28,8 @@ def evaluate(
     reward_timeout: float = 10.0,
     ks: Sequence[int] = (1,),
     enable_thinking: bool = True,
+    sample_callback: Optional[Callable[[Problem, int, str, RewardBreakdown], None]] = None,
+    show_judge_progress: bool = False,
 ) -> Tuple[dict, List[Tuple[Problem, int, int]]]:
     gens = generate(
         model,
@@ -37,14 +40,23 @@ def evaluate(
         lora_path=lora_path, enable_thinking=enable_thinking,
     )
 
-    comps, tests, owner = [], [], []
+    comps, tests, owner, sample_indices = [], [], [], []
     for i, (p, samples) in enumerate(zip(problems, gens)):
-        for text in samples:
+        for sample_index, text in enumerate(samples):
             comps.append(text)
             tests.append(p.tests)
             owner.append(i)
+            sample_indices.append(sample_index)
     bds = score_batch(comps, tests, ["stdin_stdout"] * len(comps),
-                      timeout=reward_timeout, concurrency=128)
+                      timeout=reward_timeout, concurrency=128,
+                      show_progress=show_judge_progress,
+                      progress_desc="judging eval")
+
+    if sample_callback is not None:
+        for problem_index, sample_index, text, breakdown in zip(
+            owner, sample_indices, comps, bds
+        ):
+            sample_callback(problems[problem_index], sample_index, text, breakdown)
 
     total = [0] * len(problems)
     correct = [0] * len(problems)

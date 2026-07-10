@@ -27,14 +27,18 @@ def _content(completion: Any) -> str:
     return str(completion)
 
 
-async def _score_async(texts, tests_list, modes, timeout, concurrency, cfg) -> List[RewardBreakdown]:
+async def _score_async(texts, tests_list, modes, timeout, concurrency, cfg,
+                       on_complete=None) -> List[RewardBreakdown]:
     sem = asyncio.Semaphore(concurrency)
 
     async def one(text, tests, mode):
         code = extract_code(text)
         async with sem:
             res = await execute_async(code, tests, mode=mode, timeout=timeout)
-        return compute_reward(text, res, cfg)
+        breakdown = compute_reward(text, res, cfg)
+        if on_complete is not None:
+            on_complete(1)
+        return breakdown
 
     return await asyncio.gather(*[one(t, ts, m) for t, ts, m in zip(texts, tests_list, modes)])
 
@@ -46,11 +50,24 @@ def score_batch(
     timeout: float = 10.0,
     concurrency: int = 64,
     cfg: Optional[RewardConfig] = None,
+    show_progress: bool = False,
+    progress_desc: str = "judging",
 ) -> List[RewardBreakdown]:
     texts = [_content(c) for c in completions]
     if modes is None:
         modes = ["stdin_stdout"] * len(texts)
-    return asyncio.run(_score_async(texts, tests_list, modes, timeout, concurrency, cfg))
+    pbar = None
+    if show_progress:
+        from tqdm import tqdm
+        pbar = tqdm(total=len(texts), desc=progress_desc, unit="sample")
+    try:
+        return asyncio.run(_score_async(
+            texts, tests_list, modes, timeout, concurrency, cfg,
+            on_complete=pbar.update if pbar is not None else None,
+        ))
+    finally:
+        if pbar is not None:
+            pbar.close()
 
 
 def make_reward_fn(

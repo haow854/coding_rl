@@ -80,6 +80,9 @@ python scripts/eval_model.py --model Qwen/Qwen3-4B --lora outputs/qwen3_4b_sft \
 
 This is the number that should move most. `eval_model.py` defaults to
 `--n 8 --temperature 0.8 --max-tokens 8192 --ks 1,5`.
+Each run also writes raw completions, extracted code, and judge outcomes to a
+same-named `.answers.jsonl` file next to `--out` (override with
+`--answers-out`).
 
 ## 4. Stage 2 — GRPO pool + difficulty filter (optional)
 

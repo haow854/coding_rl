@@ -18,6 +18,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rlcoder.data.load import load_clean_jsonl   # noqa: E402
 from rlcoder.eval.run_eval import evaluate         # noqa: E402
+from rlcoder.rewards import extract_code            # noqa: E402
+
+
+def _default_answers_path(args) -> str:
+    """Keep raw generations next to the metric file, or use a stable fallback."""
+    if args.answers_out:
+        return args.answers_out
+    if args.out:
+        stem, _ = os.path.splitext(args.out)
+        return stem + ".answers.jsonl"
+    model_name = os.path.basename(args.lora or args.model).replace(" ", "_")
+    data_name = os.path.splitext(os.path.basename(args.data))[0]
+    return os.path.join("outputs", "eval", f"{data_name}_{model_name}.answers.jsonl")
 
 
 def main() -> None:
@@ -44,18 +57,43 @@ def main() -> None:
                          "setting as training for base-vs-RL comparisons.")
     ap.add_argument("--ks", default="1,5")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--answers-out", default=None,
+                    help="JSONL destination for every raw completion and extracted code. "
+                         "Defaults next to --out, or under outputs/eval/.")
     args = ap.parse_args()
 
     problems = load_clean_jsonl(args.data, limit=args.limit)
     ks = [int(x) for x in args.ks.split(",")]
-    res, _ = evaluate(args.model, problems, n=args.n, temperature=args.temperature,
-                      top_p=args.top_p, top_k=args.top_k,
-                      max_tokens=args.max_tokens,
-                      max_model_len=args.max_model_len,
-                      gpu_mem_util=args.gpu_mem_util,
-                      lora_path=args.lora, ks=ks,
-                      enable_thinking=not args.no_thinking)
+    answers_out = _default_answers_path(args)
+    os.makedirs(os.path.dirname(answers_out) or ".", exist_ok=True)
+
+    with open(answers_out, "w", encoding="utf-8") as answers_file:
+        def save_answer(problem, sample_index, completion, breakdown) -> None:
+            record = {
+                "problem_id": problem.problem_id,
+                "source": problem.source,
+                "sample_index": sample_index,
+                "completion": completion,
+                "code": extract_code(completion),
+                "passed": breakdown.all_passed,
+                "pass_rate": breakdown.pass_rate,
+                "ran": breakdown.ran,
+                "timed_out": breakdown.timed_out,
+            }
+            answers_file.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        res, _ = evaluate(args.model, problems, n=args.n, temperature=args.temperature,
+                          top_p=args.top_p, top_k=args.top_k,
+                          max_tokens=args.max_tokens,
+                          max_model_len=args.max_model_len,
+                          gpu_mem_util=args.gpu_mem_util,
+                          lora_path=args.lora, ks=ks,
+                          enable_thinking=not args.no_thinking,
+                          sample_callback=save_answer,
+                          show_judge_progress=True)
+    res["answers_out"] = answers_out
     print(json.dumps(res, indent=2))
+    print("wrote", answers_out)
     if args.out:
         os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
         with open(args.out, "w", encoding="utf-8") as f:
